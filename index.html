@@ -59,8 +59,11 @@
      - Drag anywhere on the screen. The blue car follows your finger,
        but sits a bit ABOVE it so your finger doesn't cover the car.
      - Yellow circles appear at the top and drift down.
-     - Touch a circle with the car -> it vanishes, score +1.
+     - Touch a circle with the car -> it vanishes with a pop, score +1.
      - It never ends. No obstacles, no timer, no losing.
+
+   Sound is generated in code (Web Audio), so there are still no asset
+   files of any kind. Tap the speaker in the top-right to mute.
    ===================================================================== */
 
 
@@ -109,11 +112,150 @@ const CONFIG = {
   ROAD_COLOR:      0x1c2130,  // slightly lighter strip down the middle
   ROAD_WIDTH_FRAC: 0.78,      // road width as a fraction of the screen
   LANE_COLOR:      0x3a4460,  // dashed centre line
+
+  // --- Score display ---
+  SCORE_FONT_SIZE:    '54px',
+  SCORE_BOUNCE_SCALE: 1.55,   // how big the score swells when it goes up
+  CAR_BOUNCE_SCALE:   1.18,   // how big the car pops when it collects one
+
+  // --- Sound ---
+  // Every sound here is generated in code with the Web Audio API. There are
+  // no .mp3 / .wav files to download, which keeps this a genuine single file.
+  MASTER_VOLUME: 0.9,    // overall level, 0..1
+  POP_VOLUME:    0.32,   // the coin "pop" when you collect a circle
+  HUM_VOLUME:    0.035,  // soft background road hum. Set to 0 for silence.
 };
 
 
 /* ---------------------------------------------------------------------
-   2. THE GAME SCENE
+   2. SOUND
+   Instead of loading audio files, we build the sounds from scratch with
+   the Web Audio API. An oscillator is just a tone generator; shaping its
+   volume over time with a "gain" node is what turns a plain beep into a
+   recognisable pop.
+   ------------------------------------------------------------------ */
+class SoundKit {
+
+  constructor(scene) {
+    // Phaser already created a Web Audio context for its own sound system,
+    // so we borrow that one. Phones get grumpy if a page makes several.
+    this.ctx = (scene.sound && scene.sound.context) ? scene.sound.context : null;
+
+    // Some devices / browsers give us no Web Audio at all. If so, every
+    // method below quietly does nothing and the game still plays fine.
+    this.enabled = !!this.ctx;
+    this.muted = false;
+    if (!this.enabled) return;
+
+    // One volume knob that everything else feeds into, so muting is a
+    // single change rather than chasing down each sound individually.
+    this.master = this.ctx.createGain();
+    this.master.gain.value = CONFIG.MASTER_VOLUME;
+    this.master.connect(this.ctx.destination);
+  }
+
+  // Browsers refuse to make noise until the user has interacted with the
+  // page. Calling this from a tap handler wakes the audio up.
+  resume() {
+    if (this.enabled && this.ctx.state === 'suspended') this.ctx.resume();
+  }
+
+  /* The happy coin "pop": two quick notes, the second higher than the
+     first. That little upward jump is what makes it sound rewarding
+     rather than like an error beep. */
+  pop() {
+    if (!this.enabled || this.muted) return;
+
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const osc  = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'triangle';   // softer and rounder than a square wave
+
+    // Nudge the pitch a hair each time so a fast streak of collects
+    // doesn't sound like a machine stuck on repeat.
+    osc.detune.value = Phaser.Math.FloatBetween(-15, 15);   // in cents
+
+    osc.frequency.setValueAtTime(988,  t);          // B5
+    osc.frequency.setValueAtTime(1319, t + 0.055);  // jump up to E6
+
+    // The volume envelope. Ramping up from a whisper instead of starting
+    // at full blast is what avoids the "click" you get from a raw tone.
+    // (Exponential ramps can never reach exactly 0, hence 0.0001.)
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(CONFIG.POP_VOLUME, t + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.26);
+
+    osc.connect(gain);
+    gain.connect(this.master);
+
+    osc.start(t);
+    osc.stop(t + 0.28);   // tidies itself up; no cleanup needed from us
+  }
+
+  /* A soft, continuous road hum sitting under everything. It's white noise
+     with the harsh top end filtered off, which our ears read as tyres on
+     tarmac rather than as static. */
+  startRoadHum() {
+    if (!this.enabled || CONFIG.HUM_VOLUME <= 0) return;
+    if (this.humStarted) return;   // only ever one hum
+    this.humStarted = true;
+
+    const ctx = this.ctx;
+
+    // Two seconds of random samples, looped forever. Far smaller than any
+    // audio file would be, and it never repeats audibly once filtered.
+    const frames = ctx.sampleRate * 2;
+    const buffer = ctx.createBuffer(1, frames, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < frames; i++) data[i] = Math.random() * 2 - 1;
+
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+
+    // Lowpass filter: keeps the deep rumble, discards the hissy top.
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 420;
+    filter.Q.value = 0.7;
+
+    const gain = ctx.createGain();
+    gain.gain.value = CONFIG.HUM_VOLUME;
+
+    // A very slow wobble on the filter (about one cycle every 11 seconds)
+    // so the hum breathes gently instead of sitting dead flat.
+    const lfo = ctx.createOscillator();
+    const lfoDepth = ctx.createGain();
+    lfo.frequency.value = 0.09;
+    lfoDepth.gain.value = 120;
+    lfo.connect(lfoDepth);
+    lfoDepth.connect(filter.frequency);
+
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.master);
+
+    src.start();
+    lfo.start();
+  }
+
+  // Fade to silence rather than cutting instantly - an abrupt jump to zero
+  // produces an audible click.
+  setMuted(muted) {
+    this.muted = muted;
+    if (!this.enabled) return;
+    const t = this.ctx.currentTime;
+    this.master.gain.cancelScheduledValues(t);
+    this.master.gain.setValueAtTime(this.master.gain.value, t);
+    this.master.gain.linearRampToValueAtTime(muted ? 0 : CONFIG.MASTER_VOLUME, t + 0.12);
+  }
+}
+
+
+/* ---------------------------------------------------------------------
+   3. THE GAME SCENE
    A Phaser "Scene" is one screen of a game. We only need one.
    Phaser calls create() once at the start, then update() every frame.
    ------------------------------------------------------------------ */
@@ -183,14 +325,52 @@ class CarScene extends Phaser.Scene {
     this.physics.add.overlap(this.car, this.coins, this.collectCoin, null, this);
 
     // --- Score display (top-left corner) ----------------------------
-    this.scoreText = this.add.text(20, 18, 'Score: 0', {
+    this.scoreText = this.add.text(20, 14, 'Score: 0', {
       fontFamily: 'Arial, Helvetica, sans-serif',
-      fontSize: '34px',
+      fontSize: CONFIG.SCORE_FONT_SIZE,
       color: '#ffd23f',
       fontStyle: 'bold'
     });
     this.scoreText.setDepth(10);          // always drawn on top of everything
-    this.scoreText.setShadow(0, 3, '#000000', 4);
+    this.scoreText.setShadow(0, 3, '#000000', 5);
+
+    // Grow the score from its left edge, vertically centred, so the bounce
+    // swells outwards instead of shoving the text down the screen.
+    this.scoreText.setOrigin(0, 0.5);
+    this.scoreText.y = 14 + this.scoreText.height / 2;
+
+    // --- Sound, plus a mute button in the top-right corner ----------
+    this.sfx = new SoundKit(this);
+
+    this.muteBtn = this.add.text(W - 18, 20, '🔊', {
+      fontFamily: 'Arial, Helvetica, sans-serif',
+      fontSize: '32px'
+    }).setOrigin(1, 0).setDepth(10);
+
+    // A generous invisible hit area - small fingers miss small buttons.
+    this.muteBtn.setInteractive(
+      new Phaser.Geom.Rectangle(-24, -14, this.muteBtn.width + 48, this.muteBtn.height + 28),
+      Phaser.Geom.Rectangle.Contains
+    );
+
+    this.muteBtn.on('pointerdown', () => {
+      this.sfx.setMuted(!this.sfx.muted);
+      this.muteBtn.setText(this.sfx.muted ? '🔇' : '🔊');
+
+      // Remember that this particular touch belongs to the button, so the
+      // car doesn't go lurching up to the corner while we tap it.
+      this.buttonGesture = true;
+    });
+
+    this.buttonGesture = false;
+    this.input.on('pointerup', () => { this.buttonGesture = false; });
+
+    // Browsers block audio until the player interacts with the page, so the
+    // background hum can only start on the first tap - not before.
+    this.input.once('pointerdown', () => {
+      this.sfx.resume();
+      this.sfx.startRoadHum();
+    });
 
     // --- One-time "how to play" hint --------------------------------
     this.hint = this.add.text(W / 2, H * 0.34, 'Drag to drive!', {
@@ -274,16 +454,42 @@ class CarScene extends Phaser.Scene {
       onComplete: () => coin.destroy()
     });
 
+    // The happy coin "pop".
+    this.sfx.pop();
+
     // Score up by one.
     this.score += 1;
     this.scoreText.setText('Score: ' + this.score);
 
-    // Little bounce on the score text as feedback.
+    // Two bits of visual feedback: the number swells, and the car itself
+    // gives a quick squeeze - so you feel the pickup even if you're
+    // watching the car rather than the corner of the screen.
+    this.bounce(this.scoreText, CONFIG.SCORE_BOUNCE_SCALE, 110);
+    this.bounce(this.car,       CONFIG.CAR_BOUNCE_SCALE,    80);
+  }
+
+
+  /* -------------------------------------------------------------------
+     A quick "pop out and settle back" on any object.
+
+     Killing any tween already running on the target first matters: collect
+     two circles in quick succession and the second bounce would otherwise
+     fight the first, leaving the object stranded at the wrong size.
+
+     This is purely cosmetic - an Arcade physics body keeps its original
+     size, so a bouncing car does not get a bigger collision box.
+     ---------------------------------------------------------------- */
+  bounce(target, peakScale, halfDuration) {
+    this.tweens.killTweensOf(target);
+    target.setScale(1);
+
     this.tweens.add({
-      targets: this.scoreText,
-      scale: 1.25,
-      duration: 90,
-      yoyo: true
+      targets: target,
+      scale: peakScale,
+      duration: halfDuration,
+      yoyo: true,                    // swell up, then shrink back
+      ease: 'Back.easeOut',          // slight overshoot = livelier bounce
+      onComplete: () => target.setScale(1)   // guarantee we land exactly at 1
     });
   }
 
@@ -303,7 +509,9 @@ class CarScene extends Phaser.Scene {
     // On a desktop mouse there's nothing to hold down, so we follow the
     // cursor whenever it moves.
     const isTouchDevice = this.sys.game.device.input.touch;
-    const steering = this.pointerReady && (pointer.isDown || !isTouchDevice);
+    const steering = this.pointerReady
+                  && !this.buttonGesture              // this touch is on the mute button
+                  && (pointer.isDown || !isTouchDevice);
 
     if (steering) {
       this.targetX = pointer.x;
@@ -326,8 +534,11 @@ class CarScene extends Phaser.Scene {
     this.car.y = Phaser.Math.Linear(this.car.y, this.targetY, CONFIG.CAR_FOLLOW_SPEED);
 
     // Park the windscreen rectangle on the upper part of the car body.
+    // It copies the car's current scale too, so during a collect-bounce the
+    // two grow together instead of the windscreen sliding out of place.
+    this.carRoof.setScale(this.car.scaleX, this.car.scaleY);
     this.carRoof.x = this.car.x;
-    this.carRoof.y = this.car.y - CONFIG.CAR_HEIGHT * 0.20;
+    this.carRoof.y = this.car.y - CONFIG.CAR_HEIGHT * 0.20 * this.car.scaleY;
 
     // --- 3. Scroll the dashed centre line to fake forward motion ----
     const dashSpeed = 160 * (delta / 1000);  // pixels this frame
@@ -346,7 +557,7 @@ class CarScene extends Phaser.Scene {
 
 
 /* ---------------------------------------------------------------------
-   3. BOOT THE GAME
+   4. BOOT THE GAME
    ------------------------------------------------------------------ */
 new Phaser.Game({
   type: Phaser.AUTO,        // WebGL if the device supports it, else Canvas

@@ -3,6 +3,10 @@
 A simple, endless browser game for phones. Drag the blue car around and drive
 into the yellow circles to score points. No obstacles, no timer, no way to lose.
 
+Each pickup gives a coin-style pop, a quick squeeze of the car, and a bouncing
+score. There's a soft road hum underneath — tap the speaker in the top-right to
+mute everything.
+
 ## Running it
 
 Just open `index.html` in a browser — double-click the file, or drag it into a
@@ -39,11 +43,18 @@ A couple of good first knobs:
 - `FINGER_OFFSET_Y` — raise it if a thumb still covers the car.
 - `COIN_SPAWN_MS` — lower it for more circles, raise it for fewer.
 - `CAR_FOLLOW_SPEED` — higher is twitchier, lower is floatier.
+- `HUM_VOLUME` — set to `0` to drop the background hum entirely.
+- `SCORE_BOUNCE_SCALE` / `CAR_BOUNCE_SCALE` — how big the pickup bounces get.
 
 Set `debug: true` in the `physics.arcade` block to see the collision boxes.
 
 ## How it's built
 
 One file, no assets. Everything on screen is a rectangle or a circle drawn in
-code by Phaser. The game runs at a fixed 450x800 portrait size and is scaled to
-fit whatever screen it lands on, so it looks the same everywhere.
+code by Phaser, and both sounds are generated at runtime with the Web Audio API
+— there are no image or audio files to load. The game runs at a fixed 450x800
+portrait size and is scaled to fit whatever screen it lands on, so it looks the
+same everywhere.
+
+Note that browsers block audio until the player touches the screen, so the hum
+only starts on the first tap. That's a browser rule, not a bug.
