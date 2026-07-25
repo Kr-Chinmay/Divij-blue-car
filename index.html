@@ -181,7 +181,14 @@ const CONFIG = {
   // no .mp3 / .wav files to download, which keeps this a genuine single file.
   MASTER_VOLUME: 0.9,    // overall level, 0..1
   POP_VOLUME:    0.32,   // the "pop" when you collect a bubble
-  HUM_VOLUME:    0.035,  // soft background road hum. Set to 0 for silence.
+  HUM_VOLUME:    0.03,   // soft background road hum. Set to 0 for silence.
+
+  // The engine. Its pitch and volume follow how fast you're dragging the
+  // car, so it idles when you're still and revs when you swerve.
+  ENGINE_VOLUME:   0.05,  // set to 0 to switch the engine off entirely
+  ENGINE_BASE_HZ:  62,    // pitch when idling
+  ENGINE_REV_HZ:   46,    // how much higher it climbs at full tilt
+  ENGINE_MAX_PXPS: 600,   // car speed (px/sec) that counts as full throttle
 };
 
 
@@ -297,6 +304,75 @@ class SoundKit {
 
     src.start();
     lfo.start();
+  }
+
+  /* The engine.
+
+     A real engine is a buzzy tone with most of its harmonics rolled off, so
+     two sawtooth oscillators through a lowpass filter get surprisingly
+     close. Detuning one of them a few cents against the other is what stops
+     it sounding like a flat electronic drone - the two drift in and out of
+     phase and the result breathes. */
+  startEngine() {
+    if (!this.enabled || CONFIG.ENGINE_VOLUME <= 0) return;
+    if (this.engineStarted) return;   // only ever one engine
+    this.engineStarted = true;
+
+    const ctx = this.ctx;
+
+    this.engineOsc1 = ctx.createOscillator();
+    this.engineOsc2 = ctx.createOscillator();
+    this.engineOsc1.type = 'sawtooth';
+    this.engineOsc2.type = 'sawtooth';
+    this.engineOsc2.detune.value = 9;   // cents apart = a thicker, livelier note
+
+    this.engineFilter = ctx.createBiquadFilter();
+    this.engineFilter.type = 'lowpass';
+    this.engineFilter.Q.value = 1.2;
+
+    this.engineGain = ctx.createGain();
+
+    // A fast wobble on the volume is what gives the engine its "chug"
+    // instead of a smooth, lifeless hum.
+    const chug = ctx.createOscillator();
+    const chugDepth = ctx.createGain();
+    chug.frequency.value = 7.5;
+    chugDepth.gain.value = CONFIG.ENGINE_VOLUME * 0.35;
+    chug.connect(chugDepth);
+    chugDepth.connect(this.engineGain.gain);   // adds to the gain we set below
+
+    this.engineOsc1.connect(this.engineFilter);
+    this.engineOsc2.connect(this.engineFilter);
+    this.engineFilter.connect(this.engineGain);
+    this.engineGain.connect(this.master);
+
+    this.setEngineLoad(0);   // start it idling
+
+    this.engineOsc1.start();
+    this.engineOsc2.start();
+    chug.start();
+  }
+
+  /* How hard the car is being driven: 0 = sitting still, 1 = full tilt.
+
+     This is called every frame, so it writes the parameters directly rather
+     than scheduling ramps - scheduling sixty automation events a second
+     would pile up in the audio timeline and eventually stutter. */
+  setEngineLoad(load) {
+    if (!this.enabled || !this.engineStarted) return;
+
+    const l = Phaser.Math.Clamp(load, 0, 1);
+
+    const hz = CONFIG.ENGINE_BASE_HZ + l * CONFIG.ENGINE_REV_HZ;
+    this.engineOsc1.frequency.value = hz;
+    this.engineOsc2.frequency.value = hz;
+
+    // Open the filter up as it revs, so it gets brighter as well as higher.
+    this.engineFilter.frequency.value = 420 + l * 700;
+
+    // ...and a little louder. Never louder than the chug wobble allows for,
+    // so the gain can't swing negative.
+    this.engineGain.gain.value = CONFIG.ENGINE_VOLUME * (0.75 + 0.5 * l);
   }
 
   // Fade to silence rather than cutting instantly - an abrupt jump to zero
@@ -540,7 +616,11 @@ class CarScene extends Phaser.Scene {
     this.input.once('pointerdown', () => {
       this.sfx.resume();
       this.sfx.startRoadHum();
+      this.sfx.startEngine();
     });
+
+    // How hard the engine is working, smoothed between frames (see update()).
+    this.engineLoad = 0;
 
     // --- One-time "how to play" hint --------------------------------
     this.hint = this.add.text(W / 2, H * 0.30, 'Drag to drive!', {
@@ -930,8 +1010,27 @@ class CarScene extends Phaser.Scene {
     // --- 2. Glide towards that target -------------------------------
     // Linear interpolation: move a fraction of the remaining distance each
     // frame. That gives smooth movement instead of a jittery teleport.
+    const prevX = this.car.x;
+    const prevY = this.car.y;
+
     this.car.x = Phaser.Math.Linear(this.car.x, this.targetX, CONFIG.CAR_FOLLOW_SPEED);
     this.car.y = Phaser.Math.Linear(this.car.y, this.targetY, CONFIG.CAR_FOLLOW_SPEED);
+
+    // --- 2b. Let the engine follow how hard you're driving -----------
+    // Distance covered this frame, converted to pixels per second. Guarding
+    // the divide matters: delta can be 0 on the very first frame, and
+    // dividing by it would hand the engine an Infinity.
+    const moved = Phaser.Math.Distance.Between(prevX, prevY, this.car.x, this.car.y);
+    const pxPerSec = moved / (Math.max(delta, 1) / 1000);
+
+    // Smooth towards the new value rather than jumping to it, or the engine
+    // note flutters on every little frame-to-frame wobble.
+    this.engineLoad = Phaser.Math.Linear(
+      this.engineLoad,
+      Phaser.Math.Clamp(pxPerSec / CONFIG.ENGINE_MAX_PXPS, 0, 1),
+      0.12
+    );
+    this.sfx.setEngineLoad(this.engineLoad);
 
     // --- 3. Scroll the scenery to fake forward motion ---------------
     const scroll = CONFIG.SCROLL_SPEED * (delta / 1000);   // pixels this frame

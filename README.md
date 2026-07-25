@@ -9,8 +9,9 @@ Each bubble carries one of twenty kind words — *Kind*, *Share*, *Brave*,
 random order. When they're done you get a "well done" card and can go again.
 
 Each pickup gives a coin-style pop, a quick squeeze of the car, and a bouncing
-score. There's a soft road hum underneath — tap the speaker in the top-right to
-mute everything.
+score. Underneath there's a soft road hum and an engine that idles when you're
+still and revs when you swerve. Tap the speaker in the top-right to mute
+everything.
 
 ## Running it
 
@@ -50,7 +51,8 @@ A couple of good first knobs:
 - `FINGER_OFFSET_Y` — raise it if a thumb still covers the car.
 - `SPAWN_MIN_MS` / `SPAWN_MAX_MS` — lower them for more bubbles.
 - `CAR_FOLLOW_SPEED` — higher is twitchier, lower is floatier.
-- `HUM_VOLUME` — set to `0` to drop the background hum entirely.
+- `HUM_VOLUME` / `ENGINE_VOLUME` — set either to `0` to drop that sound.
+- `ENGINE_BASE_HZ` — the engine's idle pitch; lower sounds like a bigger car.
 - `SCORE_BOUNCE_SCALE` / `CAR_BOUNCE_SCALE` — how big the pickup bounces get.
 
 One catch worth knowing if you change the timing: every bubble deliberately
@@ -67,10 +69,11 @@ game from the browser console.
 
 One file, no assets. Everything on screen is drawn in code — the car and the
 roadside trees are drawn once with Phaser's Graphics object and baked into
-textures at start-up, and the road, verges and bubbles are plain shapes. Both
-sounds are generated at runtime with the Web Audio API. There are no image or
-audio files to load. The game runs at a fixed 450x800 portrait size and is
-scaled to fit whatever screen it lands on, so it looks the same everywhere.
+textures at start-up, and the road, verges and bubbles are plain shapes. All
+three sounds — the pop, the road hum and the engine — are generated at runtime
+with the Web Audio API. There are no image or audio files to load. The game
+runs at a fixed 450x800 portrait size and is scaled to fit whatever screen it
+lands on, so it looks the same everywhere.
 
 The word inside each bubble is auto-fitted: it starts at 34px and steps down
 until Phaser measures it as fitting inside the circle, so a long phrase like
