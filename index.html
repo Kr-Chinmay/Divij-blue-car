@@ -98,7 +98,10 @@ const CONFIG = {
 
   // How snappily the car catches up to your finger, per frame.
   // 1.0 = teleports instantly (twitchy). 0.1 = slow and floaty.
-  CAR_FOLLOW_SPEED: 0.25,
+  // Nudged up alongside the 1.5x speed increase - with bubbles arriving
+  // faster there's less time to intercept one, so the car has to be a
+  // little more willing. Drop it back to 0.25 if it feels twitchy.
+  CAR_FOLLOW_SPEED: 0.30,
 
   // The car is not allowed to drive above this line, so it always stays
   // in the lower part of the screen. 0.45 = top 45% of screen is off limits.
@@ -117,15 +120,18 @@ const CONFIG = {
   // never settles into a pattern.
   //
   // The minimum matters more than it looks: every bubble falls at the SAME
-  // speed, so the gap in time is also the gap in space. At 145 px/s a
-  // 1700ms pause puts 246px between two bubbles - comfortably more than a
+  // speed, so the gap in time is also the gap in space. At 218 px/s a
+  // 1133ms pause puts 247px between two bubbles - comfortably more than a
   // bubble's 168px width, so two words can never drift over each other and
   // become unreadable. (Random speeds were the bug here: a fast bubble
   // would catch up with a slow one and sit on top of it.)
-  SPAWN_MIN_MS: 1700,
-  SPAWN_MAX_MS: 2400,
+  //
+  // These came down by the same 1.5x the speeds went up, which is why the
+  // spacing is unchanged and three or four are still on screen at a time.
+  SPAWN_MIN_MS: 1133,
+  SPAWN_MAX_MS: 1600,
 
-  BUBBLE_SPEED: 145,   // downward drift, pixels per second
+  BUBBLE_SPEED: 218,   // downward drift, pixels per second
 
   // The 20 kind words. Each one appears exactly REPEATS_PER_WORD times,
   // so 20 x 10 = 200 bubbles in a full run.
@@ -167,7 +173,7 @@ const CONFIG = {
   FIELD_SHIFT_MS: 9000,   // how often to pick a new field colour
   FIELD_FADE_MS:  4000,   // how long the fade between colours takes
 
-  SCROLL_SPEED:  170,   // how fast the road slides past, pixels per second
+  SCROLL_SPEED:  255,   // how fast the road slides past, pixels per second
   PROP_COUNT:    14,    // roadside props recycled around the two verges
   PROP_GAP_MAX:  260,   // extra random gap when a prop wraps back to the top
 
@@ -193,6 +199,16 @@ const CONFIG = {
   // --- Car trimmings ---
   CAR_SHADOW_ALPHA: 0.28,
   EXHAUST_MS:       90,   // one puff per this many ms at full throttle
+
+  // --- Speedometer (bottom-right) ---
+  // Deliberately small and see-through so it sits over the right-hand verge
+  // rather than the road. The needle reads the same number that drives the
+  // engine note, so gauge and sound always agree.
+  GAUGE_RADIUS:   40,
+  GAUGE_SWEEP:    240,   // degrees of needle travel, centred on straight up
+  GAUGE_ALPHA:    0.9,
+  GAUGE_IDLE_KPH: 28,    // what it reads when you're not moving your finger
+  GAUGE_MAX_KPH:  120,   // full deflection
 
   // --- Score display ---
   SCORE_FONT_SIZE:    '54px',
@@ -541,6 +557,38 @@ class CarScene extends Phaser.Scene {
       g.generateTexture(key, 18, 22);
     }
 
+    // --- Gauge face: dial, rim and tick marks ---
+    // Only the face is baked in here. The needle has to move, so it stays a
+    // separate object that we rotate every frame.
+    g.clear();
+    const R = CONFIG.GAUGE_RADIUS;
+
+    g.fillStyle(0x101828, 0.82);
+    g.fillCircle(R, R, R);
+    g.lineStyle(3, 0xffd54f, 0.9);
+    g.strokeCircle(R, R, R - 2);
+
+    // Nine ticks spread across the needle's travel, every other one longer.
+    // Angles are measured from straight up and go clockwise, matching how
+    // Phaser rotates the needle, so the two can't drift out of agreement.
+    const half = CONFIG.GAUGE_SWEEP / 2;
+    for (let i = 0; i <= 8; i++) {
+      const rad = Phaser.Math.DegToRad(-half + (i / 8) * CONFIG.GAUGE_SWEEP);
+      const sin = Math.sin(rad), cos = Math.cos(rad);
+      const major = (i % 2 === 0);
+
+      const inner = R * (major ? 0.64 : 0.73);
+      const outer = R * 0.87;
+
+      g.lineStyle(major ? 3 : 2, major ? 0xffffff : 0x9aa4b8, 0.9);
+      g.beginPath();
+      g.moveTo(R + inner * sin, R - inner * cos);
+      g.lineTo(R + outer * sin, R - outer * cos);
+      g.strokePath();
+    }
+
+    g.generateTexture('gauge', R * 2, R * 2);
+
     // --- Fence: a post with two rails, so a run of them reads as fencing ---
     g.clear();
     g.fillStyle(0x8a6a44, 1);
@@ -707,6 +755,37 @@ class CarScene extends Phaser.Scene {
 
     this.buttonGesture = false;
     this.input.on('pointerup', () => { this.buttonGesture = false; });
+
+    // --- Speedometer (bottom-right) ---------------------------------
+    // Tucked into the corner over the right-hand verge, so it covers scenery
+    // rather than road. Nothing here is interactive, so touches pass straight
+    // through to the car - you can still steer with a finger on the gauge.
+    const gx = W - CONFIG.GAUGE_RADIUS - 8;
+    const gy = H - CONFIG.GAUGE_RADIUS - 8;
+
+    this.add.image(gx, gy, 'gauge').setDepth(10).setAlpha(CONFIG.GAUGE_ALPHA);
+
+    // Origin at the bottom of the needle so it pivots about the hub rather
+    // than spinning around its own middle.
+    this.gaugeNeedle = this.add
+      .rectangle(gx, gy, 3, CONFIG.GAUGE_RADIUS * 0.76, 0xff5a52)
+      .setOrigin(0.5, 1)
+      .setDepth(11);
+
+    this.add.circle(gx, gy, 5, 0xffd54f).setDepth(12);   // hub cap
+
+    this.gaugeText = this.add.text(gx, gy + CONFIG.GAUGE_RADIUS * 0.40, '0', {
+      fontFamily: 'Arial, Helvetica, sans-serif',
+      fontSize: '16px',
+      color: '#ffffff',
+      fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(12);
+
+    this.add.text(gx, gy + CONFIG.GAUGE_RADIUS * 0.68, 'km/h', {
+      fontFamily: 'Arial, Helvetica, sans-serif',
+      fontSize: '9px',
+      color: '#9aa4b8'
+    }).setOrigin(0.5).setDepth(12);
 
     // Browsers block audio until the player interacts with the page, so the
     // background hum can only start on the first tap - not before.
@@ -1032,12 +1111,19 @@ class CarScene extends Phaser.Scene {
     ).setDepth(4);
 
     // Drift back down the road, growing and thinning out as it goes.
+    //
+    // A puff hangs in the air while the car drives on, so it should slide
+    // backwards at exactly road speed. Deriving the distance from
+    // SCROLL_SPEED rather than hardcoding it means the smoke keeps pace
+    // automatically whenever the game's speed is retuned.
+    const life = Phaser.Math.Between(450, 700);
+
     this.tweens.add({
       targets: p,
-      y: p.y + Phaser.Math.Between(50, 90),
+      y: p.y + CONFIG.SCROLL_SPEED * (life / 1000),
       scale: 2.2,
       alpha: 0,
-      duration: Phaser.Math.Between(450, 700),
+      duration: life,
       ease: 'Quad.easeOut',
       onComplete: () => p.destroy()
     });
@@ -1235,6 +1321,21 @@ class CarScene extends Phaser.Scene {
       0.12
     );
     this.sfx.setEngineLoad(this.engineLoad);
+
+    // --- 2bb. Speedometer -------------------------------------------
+    // You're always cruising, so the gauge idles at GAUGE_IDLE_KPH and
+    // climbs from there with how hard you're driving - the same smoothed
+    // number the engine note uses, so needle and sound move together.
+    const kph = CONFIG.GAUGE_IDLE_KPH
+              + this.engineLoad * (CONFIG.GAUGE_MAX_KPH - CONFIG.GAUGE_IDLE_KPH);
+
+    // Where that speed sits on the dial, as 0..1 of full scale, then mapped
+    // onto the needle's sweep either side of straight up.
+    const fullScale = kph / CONFIG.GAUGE_MAX_KPH;
+    this.gaugeNeedle.rotation = Phaser.Math.DegToRad(
+      -CONFIG.GAUGE_SWEEP / 2 + fullScale * CONFIG.GAUGE_SWEEP
+    );
+    this.gaugeText.setText(Math.round(kph));
 
     // --- 2c. Shadow and exhaust -------------------------------------
     // The shadow tracks the car, offset a little so the light reads as

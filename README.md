@@ -14,7 +14,11 @@ an engine that idles when you're still and revs when you swerve. Tap the
 speaker in the top-right to mute everything.
 
 The road has a shadow under the car, exhaust puffing from its tail, and verges
-of trees, bushes, flowers and fencing sliding past.
+of trees, bushes, flowers and fencing sliding past. A small speedometer sits in
+the bottom-right corner — it idles at 28 km/h and climbs as you swerve, reading
+the same number that drives the engine note, so needle and sound always agree.
+
+A full run takes roughly four and a half minutes.
 
 ## Running it
 
@@ -58,11 +62,27 @@ A couple of good first knobs:
 - `ENGINE_BASE_HZ` — the engine's idle pitch; lower sounds like a bigger car.
 - `SCORE_BOUNCE_SCALE` / `CAR_BOUNCE_SCALE` — how big the pickup bounces get.
 
-One catch worth knowing if you change the timing: every bubble deliberately
-falls at the same speed, so the pause between spawns is also the gap between
-bubbles on screen. Drop `SPAWN_MIN_MS` too far and bubbles start overlapping
-and covering each other's words. Keep `SPAWN_MIN_MS × BUBBLE_SPEED / 1000`
-comfortably above `BUBBLE_RADIUS × 2`.
+### Changing the overall pace
+
+Speed lives in three values that have to move together: `SCROLL_SPEED` (how
+fast the road slides past), `BUBBLE_SPEED` (how fast bubbles fall), and the
+`SPAWN_MIN_MS` / `SPAWN_MAX_MS` pause between them.
+
+To make the game *n* times faster, multiply the two speeds by *n* and **divide**
+both pauses by *n*. That keeps the same three-or-four bubbles on screen and the
+same spacing between them — only the pace changes.
+
+The reason the pauses matter: every bubble deliberately falls at the same
+speed, so the pause between spawns is also the gap between bubbles on screen.
+Shorten the pause without slowing the fall and bubbles start overlapping and
+covering each other's words. The rule to keep is:
+
+```
+SPAWN_MIN_MS × BUBBLE_SPEED / 1000  >  BUBBLE_RADIUS × 2
+```
+
+At the current settings that's `1133 × 218 / 1000 = 247px` against a 168px
+bubble, so there's 79px of clearance no matter how the timing falls.
 
 Set `debug: true` in the `physics.arcade` block to see the collision boxes.
 `window.game` is exposed too, so `game.scene.keys.CarScene` reaches the live
