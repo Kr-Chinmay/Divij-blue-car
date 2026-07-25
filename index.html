@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Divij's Blue Car</title>
+
+  <!--
+    viewport-fit + user-scalable=no: stops the browser pinch-zooming or
+    double-tap-zooming while a small person is frantically dragging the car.
+  -->
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#10131c" />
+
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #10131c;
+
+      /* Kill the browser's own touch gestures so drags belong to the game:
+         - touch-action: none      -> no scrolling / pinching inside the canvas
+         - overscroll-behavior     -> no "pull down to refresh" on Android
+         - tap-highlight           -> no grey flash box on tap (iOS) */
+      touch-action: none;
+      overscroll-behavior: none;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    /* Centre the game canvas in whatever space the phone gives us. */
+    #game {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+  </style>
+
+  <!-- Phaser 3 straight from a CDN. No build step, no npm, no local files. -->
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+</head>
+<body>
+  <div id="game"></div>
+
+<script>
+/* =====================================================================
+   DIVIJ'S BLUE CAR  -  v1
+   ---------------------------------------------------------------------
+   Everything is drawn with code (rectangles + circles). No images.
+
+   How it plays:
+     - Drag anywhere on the screen. The blue car follows your finger,
+       but sits a bit ABOVE it so your finger doesn't cover the car.
+     - Yellow circles appear at the top and drift down.
+     - Touch a circle with the car -> it vanishes, score +1.
+     - It never ends. No obstacles, no timer, no losing.
+   ===================================================================== */
+
+
+/* ---------------------------------------------------------------------
+   1. TUNING KNOBS
+   All the numbers worth fiddling with live here, so you can change the
+   feel of the game without hunting through the code.
+   ------------------------------------------------------------------ */
+const CONFIG = {
+  // The game's internal "paper size". Phaser draws to this fixed portrait
+  // canvas and then scales the whole thing to fit the real screen, so the
+  // game looks identical on every phone.
+  GAME_WIDTH:  450,
+  GAME_HEIGHT: 800,
+
+  // --- Car ---
+  CAR_WIDTH:        56,
+  CAR_HEIGHT:       96,
+  CAR_COLOR:        0x2f6fed,  // main blue body
+  CAR_ROOF_COLOR:   0x8fb6ff,  // lighter blue "windscreen" patch on top
+  CAR_START_Y_FRAC: 0.82,      // where the car sits before you touch anything
+                               // (0 = top of screen, 1 = bottom)
+
+  // How far ABOVE your fingertip the car floats, in pixels.
+  // Bigger number = car sits higher = more of it visible above your thumb.
+  FINGER_OFFSET_Y: 110,
+
+  // How snappily the car catches up to your finger, per frame.
+  // 1.0 = teleports instantly (twitchy). 0.1 = slow and floaty.
+  CAR_FOLLOW_SPEED: 0.25,
+
+  // The car is not allowed to drive above this line, so it always stays
+  // in the lower part of the screen. 0.45 = top 45% of screen is off limits.
+  CAR_MIN_Y_FRAC: 0.45,
+
+  // --- Yellow circles ---
+  COIN_RADIUS:     22,
+  COIN_COLOR:      0xffd23f,
+  COIN_EDGE_COLOR: 0xffffff,
+  COIN_SPAWN_MS:   1000,  // one new circle roughly every this many milliseconds
+  COIN_SPEED_MIN:  110,   // downward drift speed, pixels per second
+  COIN_SPEED_MAX:  190,
+
+  // --- Scenery ---
+  BG_COLOR:        0x10131c,  // night-ish background
+  ROAD_COLOR:      0x1c2130,  // slightly lighter strip down the middle
+  ROAD_WIDTH_FRAC: 0.78,      // road width as a fraction of the screen
+  LANE_COLOR:      0x3a4460,  // dashed centre line
+};
+
+
+/* ---------------------------------------------------------------------
+   2. THE GAME SCENE
+   A Phaser "Scene" is one screen of a game. We only need one.
+   Phaser calls create() once at the start, then update() every frame.
+   ------------------------------------------------------------------ */
+class CarScene extends Phaser.Scene {
+
+  constructor() {
+    super('CarScene');
+  }
+
+  create() {
+    const W = this.scale.width;   // 450
+    const H = this.scale.height;  // 800
+
+    this.score = 0;
+
+    // --- Scenery: a road strip and a dashed centre line -------------
+    // Purely decorative. Nothing here takes part in the game logic.
+    this.add.rectangle(W / 2, H / 2, W * CONFIG.ROAD_WIDTH_FRAC, H, CONFIG.ROAD_COLOR);
+
+    this.laneDashes = [];
+    for (let y = -40; y < H + 40; y += 90) {
+      // Each dash is a thin rectangle. We store them so update() can
+      // scroll them downwards and fake forward motion.
+      this.laneDashes.push(this.add.rectangle(W / 2, y, 6, 46, CONFIG.LANE_COLOR));
+    }
+
+    // --- The car ----------------------------------------------------
+    // The body is a plain rectangle Game Object...
+    this.car = this.add.rectangle(
+      W / 2,
+      H * CONFIG.CAR_START_Y_FRAC,
+      CONFIG.CAR_WIDTH,
+      CONFIG.CAR_HEIGHT,
+      CONFIG.CAR_COLOR
+    );
+    this.car.setStrokeStyle(3, 0xffffff, 0.85);  // white outline so it pops
+
+    // ...and the "windscreen" is a second, smaller rectangle that we
+    // simply keep parked on top of the body every frame (see update()).
+    this.carRoof = this.add.rectangle(
+      this.car.x,
+      this.car.y,
+      CONFIG.CAR_WIDTH - 20,
+      CONFIG.CAR_HEIGHT * 0.32,
+      CONFIG.CAR_ROOF_COLOR
+    );
+
+    // Give the car a physics body so Phaser can do the overlap test for us.
+    this.physics.add.existing(this.car);
+    this.car.body.setAllowGravity(false);
+    this.car.body.setImmovable(true);   // circles never push the car around
+
+    // --- The yellow circles -----------------------------------------
+    // A physics group is just a bucket that holds all the live circles.
+    this.coins = this.physics.add.group();
+
+    // Ask Phaser to run spawnCoin() forever, once every COIN_SPAWN_MS.
+    this.time.addEvent({
+      delay: CONFIG.COIN_SPAWN_MS,
+      callback: this.spawnCoin,
+      callbackScope: this,
+      loop: true
+    });
+
+    // Whenever the car's box overlaps a circle's box, call collectCoin().
+    // (overlap = "touching" but with no bouncing or blocking.)
+    this.physics.add.overlap(this.car, this.coins, this.collectCoin, null, this);
+
+    // --- Score display (top-left corner) ----------------------------
+    this.scoreText = this.add.text(20, 18, 'Score: 0', {
+      fontFamily: 'Arial, Helvetica, sans-serif',
+      fontSize: '34px',
+      color: '#ffd23f',
+      fontStyle: 'bold'
+    });
+    this.scoreText.setDepth(10);          // always drawn on top of everything
+    this.scoreText.setShadow(0, 3, '#000000', 4);
+
+    // --- One-time "how to play" hint --------------------------------
+    this.hint = this.add.text(W / 2, H * 0.34, 'Drag to drive!', {
+      fontFamily: 'Arial, Helvetica, sans-serif',
+      fontSize: '30px',
+      color: '#ffffff'
+    }).setOrigin(0.5).setAlpha(0.75);
+
+    // Gently pulse the hint until the first touch, then fade it away.
+    this.tweens.add({
+      targets: this.hint, alpha: 0.25, duration: 800,
+      yoyo: true, repeat: -1
+    });
+    // Fade the hint away on the first touch - or after 6 seconds if the
+    // player is still working out what to do, so it never sits there forever.
+    const dismissHint = () => {
+      if (!this.hint || !this.hint.scene) return;   // already gone
+      this.tweens.killTweensOf(this.hint);
+      this.tweens.add({ targets: this.hint, alpha: 0, duration: 400,
+                        onComplete: () => this.hint.destroy() });
+    };
+    this.input.once('pointerdown', dismissHint);
+    this.time.delayedCall(6000, dismissHint);
+
+    // Where the car is trying to get to. Starts at its current position so
+    // it doesn't lurch anywhere before the first touch.
+    this.targetX = this.car.x;
+    this.targetY = this.car.y;
+
+    // Has the player touched / moved the pointer even once yet?
+    // Before any input, Phaser reports the pointer as sitting at (0, 0),
+    // which would yank the car into the corner the instant the game loads.
+    // So we ignore the pointer entirely until we've seen a real event.
+    this.pointerReady = false;
+    this.input.on('pointerdown', () => { this.pointerReady = true; });
+    this.input.on('pointermove', () => { this.pointerReady = true; });
+  }
+
+
+  /* -------------------------------------------------------------------
+     Create one yellow circle just above the top edge of the screen.
+     ---------------------------------------------------------------- */
+  spawnCoin() {
+    const W = this.scale.width;
+    const r = CONFIG.COIN_RADIUS;
+
+    // Random horizontal position, kept fully on screen (with a little margin).
+    const x = Phaser.Math.Between(r + 10, W - r - 10);
+
+    const coin = this.add.circle(x, -r, r, CONFIG.COIN_COLOR);
+    coin.setStrokeStyle(3, CONFIG.COIN_EDGE_COLOR, 0.9);
+
+    // Adding it to the physics group gives it a physics body automatically.
+    this.coins.add(coin);
+    coin.body.setAllowGravity(false);
+
+    // Drift straight down at a random speed, so they don't all move in lockstep.
+    coin.body.setVelocityY(Phaser.Math.Between(CONFIG.COIN_SPEED_MIN, CONFIG.COIN_SPEED_MAX));
+  }
+
+
+  /* -------------------------------------------------------------------
+     Called by Phaser when the car overlaps a circle.
+     ---------------------------------------------------------------- */
+  collectCoin(car, coin) {
+    // Guard: overlap can fire twice in one frame for the same circle,
+    // so ignore it if we've already started collecting this one.
+    if (coin.getData('collected')) return;
+    coin.setData('collected', true);
+
+    // The circle stops moving and stops counting as a target immediately...
+    coin.body.enable = false;
+    coin.body.setVelocity(0, 0);
+
+    // ...then puffs out with a quick pop animation before being destroyed.
+    this.tweens.add({
+      targets: coin,
+      scale: 1.8,
+      alpha: 0,
+      duration: 180,
+      onComplete: () => coin.destroy()
+    });
+
+    // Score up by one.
+    this.score += 1;
+    this.scoreText.setText('Score: ' + this.score);
+
+    // Little bounce on the score text as feedback.
+    this.tweens.add({
+      targets: this.scoreText,
+      scale: 1.25,
+      duration: 90,
+      yoyo: true
+    });
+  }
+
+
+  /* -------------------------------------------------------------------
+     Runs every frame (~60 times a second).
+     `delta` is milliseconds since the previous frame.
+     ---------------------------------------------------------------- */
+  update(time, delta) {
+    const W = this.scale.width;
+    const H = this.scale.height;
+
+    // --- 1. Work out where the car should be ------------------------
+    const pointer = this.input.activePointer;
+
+    // On a touch screen we only steer while a finger is actually down.
+    // On a desktop mouse there's nothing to hold down, so we follow the
+    // cursor whenever it moves.
+    const isTouchDevice = this.sys.game.device.input.touch;
+    const steering = this.pointerReady && (pointer.isDown || !isTouchDevice);
+
+    if (steering) {
+      this.targetX = pointer.x;
+
+      // THE KEY BIT: sit FINGER_OFFSET_Y pixels above the touch point,
+      // so a fingertip never sits on top of the car.
+      this.targetY = pointer.y - CONFIG.FINGER_OFFSET_Y;
+    }
+
+    // Keep the car fully on screen, and never let it climb too high.
+    const halfW = CONFIG.CAR_WIDTH  / 2;
+    const halfH = CONFIG.CAR_HEIGHT / 2;
+    this.targetX = Phaser.Math.Clamp(this.targetX, halfW, W - halfW);
+    this.targetY = Phaser.Math.Clamp(this.targetY, H * CONFIG.CAR_MIN_Y_FRAC, H - halfH);
+
+    // --- 2. Glide towards that target -------------------------------
+    // Linear interpolation: move a fraction of the remaining distance each
+    // frame. That gives smooth movement instead of a jittery teleport.
+    this.car.x = Phaser.Math.Linear(this.car.x, this.targetX, CONFIG.CAR_FOLLOW_SPEED);
+    this.car.y = Phaser.Math.Linear(this.car.y, this.targetY, CONFIG.CAR_FOLLOW_SPEED);
+
+    // Park the windscreen rectangle on the upper part of the car body.
+    this.carRoof.x = this.car.x;
+    this.carRoof.y = this.car.y - CONFIG.CAR_HEIGHT * 0.20;
+
+    // --- 3. Scroll the dashed centre line to fake forward motion ----
+    const dashSpeed = 160 * (delta / 1000);  // pixels this frame
+    this.laneDashes.forEach(dash => {
+      dash.y += dashSpeed;
+      if (dash.y > H + 40) dash.y = -40;   // wrap back to the top
+    });
+
+    // --- 4. Tidy up circles that fell off the bottom ----------------
+    // Without this they'd pile up forever and eventually slow the game down.
+    this.coins.getChildren().forEach(coin => {
+      if (coin.y > H + CONFIG.COIN_RADIUS * 2) coin.destroy();
+    });
+  }
+}
+
+
+/* ---------------------------------------------------------------------
+   3. BOOT THE GAME
+   ------------------------------------------------------------------ */
+new Phaser.Game({
+  type: Phaser.AUTO,        // WebGL if the device supports it, else Canvas
+  parent: 'game',             // draw into the <div id="game">
+  backgroundColor: CONFIG.BG_COLOR,
+
+  scale: {
+    // FIT: keep our 450x800 portrait shape and scale it to fill as much of
+    // the screen as possible, letterboxing the leftover space.
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+    width:  CONFIG.GAME_WIDTH,
+    height: CONFIG.GAME_HEIGHT
+  },
+
+  physics: {
+    default: 'arcade',
+    arcade: {
+      gravity: { y: 0 },   // nothing falls on its own; we set speeds by hand
+      debug: false         // flip to true to see collision boxes
+    }
+  },
+
+  input: {
+    activePointer: true,
+    touch: { capture: true }   // stop the browser stealing the touch events
+  },
+
+  scene: [CarScene]
+});
+</script>
+</body>
+</html>
