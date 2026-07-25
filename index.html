@@ -168,8 +168,31 @@ const CONFIG = {
   FIELD_FADE_MS:  4000,   // how long the fade between colours takes
 
   SCROLL_SPEED:  170,   // how fast the road slides past, pixels per second
-  TREE_COUNT:    9,     // trees recycled around the two verges
-  TREE_GAP_MAX:  320,   // extra random gap when a tree wraps back to the top
+  PROP_COUNT:    14,    // roadside props recycled around the two verges
+  PROP_GAP_MAX:  260,   // extra random gap when a prop wraps back to the top
+
+  // Which props appear, and how often. Listing a key more than once simply
+  // makes it more common - trees and bushes should outnumber the rest.
+  PROP_KEYS: [
+    'tree', 'tree', 'tree', 'bush', 'bush',
+    'flower1', 'flower2', 'flower3', 'fence'
+  ],
+
+  // --- Collect effects ---
+  BURST_PARTICLES: 10,
+  BURST_SPEED_MIN: 90,
+  BURST_SPEED_MAX: 190,
+
+  // --- Bubble float ---
+  // How far the artwork drifts inside each bubble. Kept small on purpose:
+  // it's decoration, and the collision circle doesn't move with it.
+  BUBBLE_SWAY_X:  9,
+  BUBBLE_BOB_Y:   5,
+  BUBBLE_SWAY_MS: 2600,   // time for one full sway cycle
+
+  // --- Car trimmings ---
+  CAR_SHADOW_ALPHA: 0.28,
+  EXHAUST_MS:       90,   // one puff per this many ms at full throttle
 
   // --- Score display ---
   SCORE_FONT_SIZE:    '54px',
@@ -402,7 +425,7 @@ class CarScene extends Phaser.Scene {
 
   /* -------------------------------------------------------------------
      ARTWORK
-     Both the car and the trees are drawn once with the Graphics object
+     The car and every roadside prop are drawn once with the Graphics object
      and then "baked" into a texture. After that they're ordinary images,
      which is far cheaper to draw than re-running the shape commands on
      every single frame.
@@ -469,23 +492,63 @@ class CarScene extends Phaser.Scene {
     g.destroy();
   }
 
-  buildTreeTexture() {
-    const g = this.make.graphics({ add: false });
+  /* Every roadside prop, baked into its own small texture. They all get
+     drawn the same way: a scratch Graphics object, some shapes, then
+     generateTexture under a name we can hand to add.image() later. */
+  buildPropTextures() {
+    let g = this.make.graphics({ add: false });
 
-    // Trunk.
+    // --- Tree: trunk plus a leafy blob ---
     g.fillStyle(0x6b4a2b, 1);
     g.fillRect(15, 26, 6, 14);
-
-    // Canopy: three overlapping circles read as a leafy blob, with a
-    // lighter one on top for a hint of sunlight.
     g.fillStyle(0x2f6b34, 1);
     g.fillCircle(18, 20, 13);
     g.fillCircle(10, 25, 9);
     g.fillCircle(26, 25, 9);
-    g.fillStyle(0x3f8b44, 1);
+    g.fillStyle(0x3f8b44, 1);   // lighter on top, as if catching the sun
     g.fillCircle(15, 16, 8);
-
     g.generateTexture('tree', 36, 42);
+
+    // --- Bush: the same idea, lower and wider, no trunk ---
+    g.clear();
+    g.fillStyle(0x2b6b3c, 1);
+    g.fillCircle(9, 18, 8);
+    g.fillCircle(21, 18, 8);
+    g.fillCircle(15, 13, 10);
+    g.fillStyle(0x3c8a4c, 1);
+    g.fillCircle(12, 11, 6);
+    g.generateTexture('bush', 30, 26);
+
+    // --- Flowers: one texture per colour ---
+    // Three separate textures rather than one tinted image, so the yellow
+    // middle stays yellow whatever colour the petals are.
+    const petals = [
+      ['flower1', 0xff8ac4],   // pink
+      ['flower2', 0xffffff],   // white
+      ['flower3', 0xc79bf5]    // lilac
+    ];
+    for (const [key, colour] of petals) {
+      g.clear();
+      g.fillStyle(0x3c7a3f, 1);          // stem
+      g.fillRect(8, 12, 2, 10);
+      g.fillStyle(colour, 1);            // four petals round a middle
+      g.fillCircle(9, 5, 4);
+      g.fillCircle(4, 9, 4);
+      g.fillCircle(14, 9, 4);
+      g.fillCircle(9, 13, 4);
+      g.fillStyle(0xffd54f, 1);          // yellow middle
+      g.fillCircle(9, 9, 3);
+      g.generateTexture(key, 18, 22);
+    }
+
+    // --- Fence: a post with two rails, so a run of them reads as fencing ---
+    g.clear();
+    g.fillStyle(0x8a6a44, 1);
+    g.fillRect(6, 2, 4, 24);     // post
+    g.fillRect(0, 8, 16, 3);     // upper rail
+    g.fillRect(0, 17, 16, 3);    // lower rail
+    g.generateTexture('fence', 16, 26);
+
     g.destroy();
   }
 
@@ -495,7 +558,7 @@ class CarScene extends Phaser.Scene {
     const H = this.scale.height;  // 800
 
     this.buildCarTexture();
-    this.buildTreeTexture();
+    this.buildPropTextures();
 
     this.score = 0;
     this.finished = false;
@@ -505,7 +568,7 @@ class CarScene extends Phaser.Scene {
     this.roadLeft  = W * CONFIG.SIDE_STRIP_FRAC;
     this.roadRight = W * (1 - CONFIG.SIDE_STRIP_FRAC);
 
-    // --- Scenery: grass verges, tar, lines, trees -------------------
+    // --- Scenery: grass verges, tar, lines, roadside props ----------
     // Purely decorative. Nothing here takes part in the game logic.
     this.currentFieldColour = Phaser.Utils.Array.GetRandom(CONFIG.FIELD_COLOURS);
 
@@ -527,13 +590,14 @@ class CarScene extends Phaser.Scene {
       this.laneDashes.push(this.add.rectangle(W / 2, y, 7, 46, CONFIG.LANE_COLOR));
     }
 
-    // Trees scattered along the verges, spread over roughly two screens'
-    // worth of road so they arrive at irregular intervals.
-    this.trees = [];
-    for (let i = 0; i < CONFIG.TREE_COUNT; i++) {
-      const tree = this.add.image(0, 0, 'tree');
-      this.placeTree(tree, Phaser.Math.Between(-H, H));
-      this.trees.push(tree);
+    // Trees, bushes, flowers and fencing scattered along the verges, spread
+    // over roughly two screens' worth of road so they arrive at irregular
+    // intervals rather than in a steady procession.
+    this.props = [];
+    for (let i = 0; i < CONFIG.PROP_COUNT; i++) {
+      const prop = this.add.image(0, 0, 'tree');
+      this.placeProp(prop, Phaser.Math.Between(-H, H));
+      this.props.push(prop);
     }
 
     // Drift the fields between greens so the scenery keeps changing.
@@ -545,8 +609,19 @@ class CarScene extends Phaser.Scene {
     });
 
     // --- The car ----------------------------------------------------
+    // A soft shadow on the tar, sitting below the bubbles so a bubble the
+    // car is driving over isn't darkened by it.
+    this.carShadow = this.add.ellipse(
+      0, 0,
+      CONFIG.CAR_WIDTH * 1.05, CONFIG.CAR_HEIGHT * 0.9,
+      0x000000, CONFIG.CAR_SHADOW_ALPHA
+    ).setDepth(4);
+
     this.car = this.add.image(W / 2, H * CONFIG.CAR_START_Y_FRAC, 'car');
     this.car.setDepth(6);
+
+    // Counts down to the next exhaust puff (see update()).
+    this.exhaustTimer = CONFIG.EXHAUST_MS;
 
     // Give the car a physics body so Phaser can do the overlap test for us.
     this.physics.add.existing(this.car);
@@ -585,6 +660,21 @@ class CarScene extends Phaser.Scene {
     this.scoreText.setOrigin(0, 0.5);
     this.scoreText.y = 14 + this.scoreText.height / 2;
 
+    // A dark chip behind the score. Bubbles pass underneath the HUD, and a
+    // bright one sliding behind bare text made both unreadable.
+    //
+    // Size it from the widest string the score will ever be, measured rather
+    // than guessed, so changing the font size doesn't break the fit.
+    this.scoreText.setText('Score: 200');
+    const chipW = this.scoreText.width + 28;
+    const chipH = this.scoreText.height + 12;
+    this.scoreText.setText('Score: 0');
+
+    this.add.graphics()
+      .setDepth(9)                       // above the bubbles, below the text
+      .fillStyle(0x101828, 0.55)
+      .fillRoundedRect(8, this.scoreText.y - chipH / 2, chipW, chipH, 16);
+
     // --- Sound, plus a mute button in the top-right corner ----------
     this.sfx = new SoundKit(this);
 
@@ -592,6 +682,13 @@ class CarScene extends Phaser.Scene {
       fontFamily: 'Arial, Helvetica, sans-serif',
       fontSize: '32px'
     }).setOrigin(1, 0).setDepth(10);
+
+    // Matching chip behind it, for the same reason as the score.
+    this.add.graphics()
+      .setDepth(9)
+      .fillStyle(0x101828, 0.55)
+      .fillRoundedRect(W - this.muteBtn.width - 30, 12,
+                       this.muteBtn.width + 24, this.muteBtn.height + 14, 14);
 
     // A generous invisible hit area - small fingers miss small buttons.
     this.muteBtn.setInteractive(
@@ -784,8 +881,21 @@ class CarScene extends Phaser.Scene {
     const shine = this.add.ellipse(-R * 0.34, -R * 0.40, R * 0.52, R * 0.34, 0xffffff, 0.30);
     shine.setAngle(-25);
 
-    bubble.add([ball, shine, this.makeBubbleLabel(word, R)]);
+    // The artwork goes in a second container nested inside the first. The
+    // outer one is what physics drives; the inner one is free to drift about
+    // for the floating effect without ever moving the collision circle.
+    const inner = this.add.container(0, 0);
+    inner.add([ball, shine, this.makeBubbleLabel(word, R)]);
+
+    bubble.add(inner);
     bubble.setDepth(5);
+    bubble.setData('inner', inner);
+    bubble.setData('colour', colour);
+    bubble.setData('phase', Phaser.Math.FloatBetween(0, Math.PI * 2));
+
+    // Swell into view rather than simply appearing at the top edge.
+    bubble.setScale(0.35);
+    this.tweens.add({ targets: bubble, scale: 1, duration: 380, ease: 'Back.easeOut' });
 
     // Adding it to the physics group gives it a physics body automatically.
     this.bubbles.add(bubble);
@@ -819,6 +929,15 @@ class CarScene extends Phaser.Scene {
     // the "how many are on screen" limit while its pop plays out.
     this.bubbles.remove(bubble);
 
+    // Scatter a handful of bits in the bubble's own colour, and float a
+    // "+1" up from where it was caught.
+    this.burst(bubble.x, bubble.y, bubble.getData('colour'));
+    this.scorePopup(bubble.x, bubble.y);
+
+    // Drop the entrance tween if it's somehow still running, or it would
+    // fight the pop below and the bubble would never finish shrinking.
+    this.tweens.killTweensOf(bubble);
+
     // ...then swells and fades before removing itself.
     this.tweens.add({
       targets: bubble,
@@ -841,6 +960,87 @@ class CarScene extends Phaser.Scene {
     // watching the car rather than the corner of the screen.
     this.bounce(this.scoreText, CONFIG.SCORE_BOUNCE_SCALE, 110);
     this.bounce(this.car,       CONFIG.CAR_BOUNCE_SCALE,    80);
+  }
+
+
+  /* -------------------------------------------------------------------
+     A spray of little discs in the popped bubble's colour.
+
+     Each one is an ordinary circle on a tween rather than a Phaser particle
+     emitter - emitters need a texture, and this stays closer to how the
+     rest of the game is drawn. A collect happens at most once a second or
+     so, so ten short-lived circles cost nothing.
+     ---------------------------------------------------------------- */
+  burst(x, y, colour) {
+    for (let i = 0; i < CONFIG.BURST_PARTICLES; i++) {
+      // Spread them evenly around the circle, then jitter each one a little
+      // so the ring doesn't look mechanical.
+      const angle = (Math.PI * 2 * i) / CONFIG.BURST_PARTICLES
+                  + Phaser.Math.FloatBetween(-0.25, 0.25);
+      const dist = Phaser.Math.Between(CONFIG.BURST_SPEED_MIN, CONFIG.BURST_SPEED_MAX);
+
+      const bit = this.add.circle(x, y, Phaser.Math.Between(5, 10), colour).setDepth(7);
+
+      this.tweens.add({
+        targets: bit,
+        x: x + Math.cos(angle) * dist,
+        y: y + Math.sin(angle) * dist,
+        scale: 0,
+        alpha: 0,
+        duration: Phaser.Math.Between(380, 620),
+        ease: 'Quad.easeOut',
+        onComplete: () => bit.destroy()
+      });
+    }
+  }
+
+
+  /* -------------------------------------------------------------------
+     A "+1" that drifts up from wherever the bubble was caught.
+     ---------------------------------------------------------------- */
+  scorePopup(x, y) {
+    const label = this.add.text(x, y, '+1', {
+      fontFamily: CONFIG.BUBBLE_FONT,
+      fontSize: '38px',
+      fontStyle: 'bold',
+      color: '#ffffff',
+      stroke: CONFIG.BUBBLE_STROKE_COLOR,
+      strokeThickness: 7
+    }).setOrigin(0.5).setDepth(11);
+
+    this.tweens.add({
+      targets: label,
+      y: y - 90,
+      alpha: 0,
+      duration: 750,
+      ease: 'Quad.easeOut',
+      onComplete: () => label.destroy()
+    });
+  }
+
+
+  /* -------------------------------------------------------------------
+     One puff of exhaust from the back of the car.
+     ---------------------------------------------------------------- */
+  puff() {
+    const p = this.add.circle(
+      this.car.x + Phaser.Math.Between(-9, 9),
+      this.car.y + CONFIG.CAR_HEIGHT * 0.48,
+      Phaser.Math.Between(4, 7),
+      0xb9c0cc,
+      0.45
+    ).setDepth(4);
+
+    // Drift back down the road, growing and thinning out as it goes.
+    this.tweens.add({
+      targets: p,
+      y: p.y + Phaser.Math.Between(50, 90),
+      scale: 2.2,
+      alpha: 0,
+      duration: Phaser.Math.Between(450, 700),
+      ease: 'Quad.easeOut',
+      onComplete: () => p.destroy()
+    });
   }
 
 
@@ -872,20 +1072,24 @@ class CarScene extends Phaser.Scene {
 
 
   /* -------------------------------------------------------------------
-     Drop a tree somewhere on one of the two grass verges.
+     Drop a roadside prop somewhere on one of the two grass verges.
      ---------------------------------------------------------------- */
-  placeTree(tree, y) {
+  placeProp(prop, y) {
     const W = this.scale.width;
 
-    tree.setScale(Phaser.Math.FloatBetween(0.8, 1.15));
+    // Fresh identity each time round: a tree can come back as a bush.
+    prop.setTexture(Phaser.Utils.Array.GetRandom(CONFIG.PROP_KEYS));
+    prop.setScale(Phaser.Math.FloatBetween(0.8, 1.15));
 
-    const half = tree.displayWidth / 2 + 2;
+    // Work the half-width out AFTER scaling, or a big prop hangs over the
+    // edge of the verge and onto the tar.
+    const half = prop.displayWidth / 2 + 2;
     const onLeft = Math.random() < 0.5;
 
-    tree.x = onLeft
+    prop.x = onLeft
       ? Phaser.Math.Between(half, Math.max(half, this.roadLeft - half))
       : Phaser.Math.Between(Math.min(W - half, this.roadRight + half), W - half);
-    tree.y = y;
+    prop.y = y;
   }
 
 
@@ -1032,6 +1236,21 @@ class CarScene extends Phaser.Scene {
     );
     this.sfx.setEngineLoad(this.engineLoad);
 
+    // --- 2c. Shadow and exhaust -------------------------------------
+    // The shadow tracks the car, offset a little so the light reads as
+    // coming from the front-left, and matches its bounce.
+    this.carShadow.x = this.car.x + 5;
+    this.carShadow.y = this.car.y + 9;
+    this.carShadow.setScale(this.car.scaleX, this.car.scaleY);
+
+    // Puff more often the harder the engine is working. The 0.35 floor
+    // keeps a slow idle trickle going even when you're not moving.
+    this.exhaustTimer -= delta * (0.35 + this.engineLoad);
+    if (this.exhaustTimer <= 0) {
+      this.exhaustTimer = CONFIG.EXHAUST_MS;
+      this.puff();
+    }
+
     // --- 3. Scroll the scenery to fake forward motion ---------------
     const scroll = CONFIG.SCROLL_SPEED * (delta / 1000);   // pixels this frame
 
@@ -1040,13 +1259,26 @@ class CarScene extends Phaser.Scene {
       if (dash.y > H + 40) dash.y = -40;    // wrap back to the top
     });
 
-    this.trees.forEach(tree => {
-      tree.y += scroll * 0.85;   // a little slower than the road = depth
-      // Recycle with a random extra gap above the screen, so trees arrive
+    this.props.forEach(prop => {
+      prop.y += scroll * 0.85;   // a little slower than the road = depth
+      // Recycle with a random extra gap above the screen, so props arrive
       // occasionally rather than in a steady procession.
-      if (tree.y > H + 60) {
-        this.placeTree(tree, -60 - Phaser.Math.Between(0, CONFIG.TREE_GAP_MAX));
+      if (prop.y > H + 60) {
+        this.placeProp(prop, -60 - Phaser.Math.Between(0, CONFIG.PROP_GAP_MAX));
       }
+    });
+
+    // --- 3b. Let the bubbles float ----------------------------------
+    // This drifts the artwork INSIDE each bubble, never the bubble itself,
+    // so the physics circle stays exactly where Arcade put it. Each bubble
+    // gets its own phase offset so they don't all sway in unison.
+    const sway = (time / CONFIG.BUBBLE_SWAY_MS) * Math.PI * 2;
+    this.bubbles.getChildren().forEach(bubble => {
+      const inner = bubble.getData('inner');
+      if (!inner) return;
+      const phase = bubble.getData('phase');
+      inner.x = Math.sin(sway + phase) * CONFIG.BUBBLE_SWAY_X;
+      inner.y = Math.cos((sway + phase) * 1.6) * CONFIG.BUBBLE_BOB_Y;
     });
 
     // --- 4. Tidy up bubbles that fell off the bottom ----------------

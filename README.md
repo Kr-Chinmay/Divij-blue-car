@@ -8,10 +8,13 @@ Each bubble carries one of twenty kind words — *Kind*, *Share*, *Brave*,
 *Keep Going* and so on. A full run is 200 bubbles: every word ten times, in a
 random order. When they're done you get a "well done" card and can go again.
 
-Each pickup gives a coin-style pop, a quick squeeze of the car, and a bouncing
-score. Underneath there's a soft road hum and an engine that idles when you're
-still and revs when you swerve. Tap the speaker in the top-right to mute
-everything.
+Each pickup gives a coin-style pop, a burst of colour, a floating "+1", a quick
+squeeze of the car and a bouncing score. Underneath there's a soft road hum and
+an engine that idles when you're still and revs when you swerve. Tap the
+speaker in the top-right to mute everything.
+
+The road has a shadow under the car, exhaust puffing from its tail, and verges
+of trees, bushes, flowers and fencing sliding past.
 
 ## Running it
 
