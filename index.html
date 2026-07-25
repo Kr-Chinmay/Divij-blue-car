@@ -12,7 +12,7 @@
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="theme-color" content="#10131c" />
+  <meta name="theme-color" content="#2b2f3a" />
 
   <style>
     html, body {
@@ -20,7 +20,7 @@
       padding: 0;
       height: 100%;
       overflow: hidden;
-      background: #10131c;
+      background: #2b2f3a;
 
       /* Kill the browser's own touch gestures so drags belong to the game:
          - touch-action: none      -> no scrolling / pinching inside the canvas
@@ -51,19 +51,21 @@
 
 <script>
 /* =====================================================================
-   DIVIJ'S BLUE CAR  -  v1
+   DIVIJ'S BLUE CAR  -  v3
    ---------------------------------------------------------------------
-   Everything is drawn with code (rectangles + circles). No images.
+   Everything you see is drawn in code and baked into textures at start-up.
+   There are no .png / .mp3 files anywhere - this really is one single file.
 
    How it plays:
-     - Drag anywhere on the screen. The blue car follows your finger,
-       but sits a bit ABOVE it so your finger doesn't cover the car.
-     - Yellow circles appear at the top and drift down.
-     - Touch a circle with the car -> it vanishes with a pop, score +1.
-     - It never ends. No obstacles, no timer, no losing.
+     - Drag anywhere on the screen. The blue car follows your finger, but
+       sits a bit ABOVE it so your finger doesn't cover the car.
+     - Big colourful bubbles float down, each with a kind word inside.
+     - Drive into a bubble -> it pops with a happy sound, score +1.
+     - 200 bubbles in total: all 20 words, ten times each, in random order.
+       When they're done you get a "well done" card and can go again.
 
-   Sound is generated in code (Web Audio), so there are still no asset
-   files of any kind. Tap the speaker in the top-right to mute.
+   Sound is generated in code with the Web Audio API. Tap the speaker in
+   the top-right to mute.
    ===================================================================== */
 
 
@@ -80,12 +82,15 @@ const CONFIG = {
   GAME_HEIGHT: 800,
 
   // --- Car ---
-  CAR_WIDTH:        56,
-  CAR_HEIGHT:       96,
-  CAR_COLOR:        0x2f6fed,  // main blue body
-  CAR_ROOF_COLOR:   0x8fb6ff,  // lighter blue "windscreen" patch on top
+  // The car artwork is drawn at exactly this size, so its on-screen scale
+  // stays at 1. That matters: the collect-bounce tweens the scale, and it
+  // can only spring back to "normal" if normal means 1.
+  CAR_WIDTH:        64,
+  CAR_HEIGHT:       112,
+  CAR_COLOR:        0x2f6fed,  // main blue bodywork
+  CAR_ROOF_COLOR:   0x4b87f2,  // roof panel, a touch lighter than the body
+  CAR_GLASS_COLOR:  0xb9d5ff,  // windscreen + rear hatch glass
   CAR_START_Y_FRAC: 0.82,      // where the car sits before you touch anything
-                               // (0 = top of screen, 1 = bottom)
 
   // How far ABOVE your fingertip the car floats, in pixels.
   // Bigger number = car sits higher = more of it visible above your thumb.
@@ -99,19 +104,72 @@ const CONFIG = {
   // in the lower part of the screen. 0.45 = top 45% of screen is off limits.
   CAR_MIN_Y_FRAC: 0.45,
 
-  // --- Yellow circles ---
-  COIN_RADIUS:     22,
-  COIN_COLOR:      0xffd23f,
-  COIN_EDGE_COLOR: 0xffffff,
-  COIN_SPAWN_MS:   1000,  // one new circle roughly every this many milliseconds
-  COIN_SPEED_MIN:  110,   // downward drift speed, pixels per second
-  COIN_SPEED_MAX:  190,
+  // --- Bubbles ---
+  // One radius for every bubble, chosen so the longest phrase ("Keep Going")
+  // fits comfortably inside with a margin all the way round.
+  BUBBLE_RADIUS: 84,
+
+  // Only ever this many on screen at once. Few and large beats many and
+  // small - each word gets a moment to be read.
+  MAX_ACTIVE_BUBBLES: 4,
+
+  // Gap between spawns, picked at random inside this range so the rhythm
+  // never settles into a pattern.
+  //
+  // The minimum matters more than it looks: every bubble falls at the SAME
+  // speed, so the gap in time is also the gap in space. At 145 px/s a
+  // 1700ms pause puts 246px between two bubbles - comfortably more than a
+  // bubble's 168px width, so two words can never drift over each other and
+  // become unreadable. (Random speeds were the bug here: a fast bubble
+  // would catch up with a slow one and sit on top of it.)
+  SPAWN_MIN_MS: 1700,
+  SPAWN_MAX_MS: 2400,
+
+  BUBBLE_SPEED: 145,   // downward drift, pixels per second
+
+  // The 20 kind words. Each one appears exactly REPEATS_PER_WORD times,
+  // so 20 x 10 = 200 bubbles in a full run.
+  WORDS: [
+    'Kind', 'Share', 'Help', 'Thank you', 'Sorry',
+    'Gentle', 'Brave', 'Try Again', 'Patient', 'Calm',
+    'Learn', 'Focus', 'Practice', 'Happy', 'Grateful',
+    'Believe', 'Faith', 'Honest', 'I can', 'Keep Going'
+  ],
+  REPEATS_PER_WORD: 10,
+
+  // Bright, cheerful fills, stepped through in order so two neighbours are
+  // never the same colour: sky blue, grass green, sunshine yellow, coral,
+  // purple, orange, pink.
+  BUBBLE_COLOURS: [
+    0x4fc3f7, 0x66bb6a, 0xffd54f, 0xff7f6b,
+    0xab7df6, 0xffa726, 0xff8ac4
+  ],
+
+  // Word styling. Legibility first: white letters, thick dark outline, so
+  // the text reads against every one of the bubble colours above.
+  BUBBLE_FONT: '"Comic Sans MS", "Chalkboard SE", "Segoe UI", Verdana, sans-serif',
+  BUBBLE_FONT_MAX: 34,   // starting size; shrinks only if the word is long
+  BUBBLE_FONT_MIN: 17,   // never go below this, however long the word
+  BUBBLE_TEXT_COLOR:   '#ffffff',
+  BUBBLE_STROKE_COLOR: '#101828',
 
   // --- Scenery ---
-  BG_COLOR:        0x10131c,  // night-ish background
-  ROAD_COLOR:      0x1c2130,  // slightly lighter strip down the middle
-  ROAD_WIDTH_FRAC: 0.78,      // road width as a fraction of the screen
-  LANE_COLOR:      0x3a4460,  // dashed centre line
+  ROAD_COLOR:       0x35383f,  // tar
+  LANE_COLOR:       0xf0e6a8,  // dashed centre line
+  EDGE_LINE_COLOR:  0xf2f2f2,  // solid white lines down each side
+
+  // How much of the screen width each grass verge takes (0.13 = 13% a side,
+  // leaving 74% of the width as road).
+  SIDE_STRIP_FRAC: 0.13,
+
+  // The fields drift between these greens so the view keeps changing.
+  FIELD_COLOURS: [0x3f7d3a, 0x4c8f3f, 0x36784b, 0x5a9440, 0x2f6f45],
+  FIELD_SHIFT_MS: 9000,   // how often to pick a new field colour
+  FIELD_FADE_MS:  4000,   // how long the fade between colours takes
+
+  SCROLL_SPEED:  170,   // how fast the road slides past, pixels per second
+  TREE_COUNT:    9,     // trees recycled around the two verges
+  TREE_GAP_MAX:  320,   // extra random gap when a tree wraps back to the top
 
   // --- Score display ---
   SCORE_FONT_SIZE:    '54px',
@@ -122,7 +180,7 @@ const CONFIG = {
   // Every sound here is generated in code with the Web Audio API. There are
   // no .mp3 / .wav files to download, which keeps this a genuine single file.
   MASTER_VOLUME: 0.9,    // overall level, 0..1
-  POP_VOLUME:    0.32,   // the coin "pop" when you collect a circle
+  POP_VOLUME:    0.32,   // the "pop" when you collect a bubble
   HUM_VOLUME:    0.035,  // soft background road hum. Set to 0 for silence.
 };
 
@@ -265,64 +323,176 @@ class CarScene extends Phaser.Scene {
     super('CarScene');
   }
 
+
+  /* -------------------------------------------------------------------
+     ARTWORK
+     Both the car and the trees are drawn once with the Graphics object
+     and then "baked" into a texture. After that they're ordinary images,
+     which is far cheaper to draw than re-running the shape commands on
+     every single frame.
+     ---------------------------------------------------------------- */
+  buildCarTexture() {
+    const w = CONFIG.CAR_WIDTH;
+    const h = CONFIG.CAR_HEIGHT;
+
+    // make.graphics (rather than add.graphics) keeps this off the screen -
+    // it's a scratch pad, not something the player should ever see.
+    const g = this.make.graphics({ add: false });
+
+    // Wheels first, so the bodywork sits on top of them and only the
+    // outer edge of each tyre peeks out. Viewed from above, that's all
+    // you'd actually see of a wheel.
+    g.fillStyle(0x14161d, 1);
+    g.fillRoundedRect(0,     h * 0.16, 9, h * 0.19, 3);
+    g.fillRoundedRect(w - 9, h * 0.16, 9, h * 0.19, 3);
+    g.fillRoundedRect(0,     h * 0.66, 9, h * 0.19, 3);
+    g.fillRoundedRect(w - 9, h * 0.66, 9, h * 0.19, 3);
+
+    // Wing mirrors, poking out just ahead of the windscreen.
+    g.fillStyle(0x1d4fb5, 1);
+    g.fillRoundedRect(1,     h * 0.28, 8, 7, 3);
+    g.fillRoundedRect(w - 9, h * 0.28, 8, 7, 3);
+
+    // The body. A hatchback's defining feature from above is the tail: it
+    // stops abruptly instead of tapering into a boot, so the rear corners
+    // get a much tighter radius than the rounded nose.
+    const bx = 5, by = 2, bw = w - 10, bh = h - 4;
+    const bodyRadius = { tl: 17, tr: 17, bl: 8, br: 8 };
+
+    g.fillStyle(CONFIG.CAR_COLOR, 1);
+    g.fillRoundedRect(bx, by, bw, bh, bodyRadius);
+    g.lineStyle(3, 0x0e1f45, 1);
+    g.strokeRoundedRect(bx, by, bw, bh, bodyRadius);
+
+    // Roof panel, sitting between the two windows.
+    g.fillStyle(CONFIG.CAR_ROOF_COLOR, 1);
+    g.fillRoundedRect(bx + 5, by + h * 0.36, bw - 10, h * 0.26, 6);
+
+    // Windscreen at the front, and the big near-vertical hatch glass at
+    // the back that gives this shape its name.
+    g.fillStyle(CONFIG.CAR_GLASS_COLOR, 1);
+    g.fillRoundedRect(bx + 6, by + h * 0.19, bw - 12, h * 0.15, 6);
+    g.fillRoundedRect(bx + 6, by + h * 0.64, bw - 12, h * 0.17, 6);
+
+    // ROOF RAILS: two dark bars running front-to-back along the roof edges.
+    g.fillStyle(0x20262f, 1);
+    g.fillRoundedRect(bx + 3,      by + h * 0.34, 5, h * 0.30, 2.5);
+    g.fillRoundedRect(bx + bw - 8, by + h * 0.34, 5, h * 0.30, 2.5);
+
+    // Headlights at the front...
+    g.fillStyle(0xfff3c4, 1);
+    g.fillRoundedRect(bx + 5,       by + 3, 14, 7, 3);
+    g.fillRoundedRect(bx + bw - 19, by + 3, 14, 7, 3);
+
+    // ...and tail lights at the back.
+    g.fillStyle(0xe8402f, 1);
+    g.fillRoundedRect(bx + 5,       by + bh - 9, 14, 6, 3);
+    g.fillRoundedRect(bx + bw - 19, by + bh - 9, 14, 6, 3);
+
+    g.generateTexture('car', w, h);
+    g.destroy();
+  }
+
+  buildTreeTexture() {
+    const g = this.make.graphics({ add: false });
+
+    // Trunk.
+    g.fillStyle(0x6b4a2b, 1);
+    g.fillRect(15, 26, 6, 14);
+
+    // Canopy: three overlapping circles read as a leafy blob, with a
+    // lighter one on top for a hint of sunlight.
+    g.fillStyle(0x2f6b34, 1);
+    g.fillCircle(18, 20, 13);
+    g.fillCircle(10, 25, 9);
+    g.fillCircle(26, 25, 9);
+    g.fillStyle(0x3f8b44, 1);
+    g.fillCircle(15, 16, 8);
+
+    g.generateTexture('tree', 36, 42);
+    g.destroy();
+  }
+
+
   create() {
     const W = this.scale.width;   // 450
     const H = this.scale.height;  // 800
 
+    this.buildCarTexture();
+    this.buildTreeTexture();
+
     this.score = 0;
+    this.finished = false;
 
-    // --- Scenery: a road strip and a dashed centre line -------------
+    // Where the tar starts and stops. Worked out once and reused by the
+    // scenery, the car's steering limits and the bubble spawner.
+    this.roadLeft  = W * CONFIG.SIDE_STRIP_FRAC;
+    this.roadRight = W * (1 - CONFIG.SIDE_STRIP_FRAC);
+
+    // --- Scenery: grass verges, tar, lines, trees -------------------
     // Purely decorative. Nothing here takes part in the game logic.
-    this.add.rectangle(W / 2, H / 2, W * CONFIG.ROAD_WIDTH_FRAC, H, CONFIG.ROAD_COLOR);
+    this.currentFieldColour = Phaser.Utils.Array.GetRandom(CONFIG.FIELD_COLOURS);
 
+    this.fieldLeft = this.add.rectangle(
+      this.roadLeft / 2, H / 2, this.roadLeft, H, this.currentFieldColour);
+    this.fieldRight = this.add.rectangle(
+      (W + this.roadRight) / 2, H / 2, W - this.roadRight, H, this.currentFieldColour);
+
+    // The tar itself.
+    this.add.rectangle(W / 2, H / 2, this.roadRight - this.roadLeft, H, CONFIG.ROAD_COLOR);
+
+    // Solid white lines down both edges of the road.
+    this.add.rectangle(this.roadLeft + 3,  H / 2, 4, H, CONFIG.EDGE_LINE_COLOR, 0.75);
+    this.add.rectangle(this.roadRight - 3, H / 2, 4, H, CONFIG.EDGE_LINE_COLOR, 0.75);
+
+    // Dashed centre line. We store the dashes so update() can scroll them.
     this.laneDashes = [];
     for (let y = -40; y < H + 40; y += 90) {
-      // Each dash is a thin rectangle. We store them so update() can
-      // scroll them downwards and fake forward motion.
-      this.laneDashes.push(this.add.rectangle(W / 2, y, 6, 46, CONFIG.LANE_COLOR));
+      this.laneDashes.push(this.add.rectangle(W / 2, y, 7, 46, CONFIG.LANE_COLOR));
     }
 
-    // --- The car ----------------------------------------------------
-    // The body is a plain rectangle Game Object...
-    this.car = this.add.rectangle(
-      W / 2,
-      H * CONFIG.CAR_START_Y_FRAC,
-      CONFIG.CAR_WIDTH,
-      CONFIG.CAR_HEIGHT,
-      CONFIG.CAR_COLOR
-    );
-    this.car.setStrokeStyle(3, 0xffffff, 0.85);  // white outline so it pops
+    // Trees scattered along the verges, spread over roughly two screens'
+    // worth of road so they arrive at irregular intervals.
+    this.trees = [];
+    for (let i = 0; i < CONFIG.TREE_COUNT; i++) {
+      const tree = this.add.image(0, 0, 'tree');
+      this.placeTree(tree, Phaser.Math.Between(-H, H));
+      this.trees.push(tree);
+    }
 
-    // ...and the "windscreen" is a second, smaller rectangle that we
-    // simply keep parked on top of the body every frame (see update()).
-    this.carRoof = this.add.rectangle(
-      this.car.x,
-      this.car.y,
-      CONFIG.CAR_WIDTH - 20,
-      CONFIG.CAR_HEIGHT * 0.32,
-      CONFIG.CAR_ROOF_COLOR
-    );
-
-    // Give the car a physics body so Phaser can do the overlap test for us.
-    this.physics.add.existing(this.car);
-    this.car.body.setAllowGravity(false);
-    this.car.body.setImmovable(true);   // circles never push the car around
-
-    // --- The yellow circles -----------------------------------------
-    // A physics group is just a bucket that holds all the live circles.
-    this.coins = this.physics.add.group();
-
-    // Ask Phaser to run spawnCoin() forever, once every COIN_SPAWN_MS.
+    // Drift the fields between greens so the scenery keeps changing.
     this.time.addEvent({
-      delay: CONFIG.COIN_SPAWN_MS,
-      callback: this.spawnCoin,
+      delay: CONFIG.FIELD_SHIFT_MS,
+      callback: this.shiftFieldColour,
       callbackScope: this,
       loop: true
     });
 
-    // Whenever the car's box overlaps a circle's box, call collectCoin().
+    // --- The car ----------------------------------------------------
+    this.car = this.add.image(W / 2, H * CONFIG.CAR_START_Y_FRAC, 'car');
+    this.car.setDepth(6);
+
+    // Give the car a physics body so Phaser can do the overlap test for us.
+    this.physics.add.existing(this.car);
+    this.car.body.setAllowGravity(false);
+    this.car.body.setImmovable(true);   // bubbles never push the car around
+
+    // Trim the collision box in a little from the artwork. A slightly
+    // forgiving box feels better than a pixel-exact one for small hands.
+    this.car.body.setSize(CONFIG.CAR_WIDTH - 10, CONFIG.CAR_HEIGHT - 12, true);
+
+    // --- The bubbles ------------------------------------------------
+    // A physics group is just a bucket that holds all the live bubbles.
+    this.bubbles = this.physics.add.group();
+
+    // Whenever the car overlaps a bubble, call collectBubble().
     // (overlap = "touching" but with no bouncing or blocking.)
-    this.physics.add.overlap(this.car, this.coins, this.collectCoin, null, this);
+    this.physics.add.overlap(this.car, this.bubbles, this.collectBubble, null, this);
+
+    this.colourIndex  = Phaser.Math.Between(0, CONFIG.BUBBLE_COLOURS.length - 1);
+    this.lastBubbleX  = W / 2;
+    this.buildDeck();
+    this.scheduleNextBubble();
 
     // --- Score display (top-left corner) ----------------------------
     this.scoreText = this.add.text(20, 14, 'Score: 0', {
@@ -373,15 +543,17 @@ class CarScene extends Phaser.Scene {
     });
 
     // --- One-time "how to play" hint --------------------------------
-    this.hint = this.add.text(W / 2, H * 0.34, 'Drag to drive!', {
+    this.hint = this.add.text(W / 2, H * 0.30, 'Drag to drive!', {
       fontFamily: 'Arial, Helvetica, sans-serif',
       fontSize: '30px',
-      color: '#ffffff'
-    }).setOrigin(0.5).setAlpha(0.75);
+      color: '#ffffff',
+      stroke: '#101828',
+      strokeThickness: 5
+    }).setOrigin(0.5).setDepth(9).setAlpha(0.85);
 
     // Gently pulse the hint until the first touch, then fade it away.
     this.tweens.add({
-      targets: this.hint, alpha: 0.25, duration: 800,
+      targets: this.hint, alpha: 0.3, duration: 800,
       yoyo: true, repeat: -1
     });
     // Fade the hint away on the first touch - or after 6 seconds if the
@@ -411,50 +583,173 @@ class CarScene extends Phaser.Scene {
 
 
   /* -------------------------------------------------------------------
-     Create one yellow circle just above the top edge of the screen.
+     Build the running order for a full session.
+
+     Stacking ten copies of the word list and shuffling the whole thing
+     guarantees every word appears exactly ten times, while the order stays
+     unpredictable. Handing out random words instead would mean some words
+     turning up constantly and others barely at all.
      ---------------------------------------------------------------- */
-  spawnCoin() {
-    const W = this.scale.width;
-    const r = CONFIG.COIN_RADIUS;
-
-    // Random horizontal position, kept fully on screen (with a little margin).
-    const x = Phaser.Math.Between(r + 10, W - r - 10);
-
-    const coin = this.add.circle(x, -r, r, CONFIG.COIN_COLOR);
-    coin.setStrokeStyle(3, CONFIG.COIN_EDGE_COLOR, 0.9);
-
-    // Adding it to the physics group gives it a physics body automatically.
-    this.coins.add(coin);
-    coin.body.setAllowGravity(false);
-
-    // Drift straight down at a random speed, so they don't all move in lockstep.
-    coin.body.setVelocityY(Phaser.Math.Between(CONFIG.COIN_SPEED_MIN, CONFIG.COIN_SPEED_MAX));
+  buildDeck() {
+    this.deck = [];
+    for (let round = 0; round < CONFIG.REPEATS_PER_WORD; round++) {
+      this.deck = this.deck.concat(CONFIG.WORDS);
+    }
+    Phaser.Utils.Array.Shuffle(this.deck);
   }
 
 
   /* -------------------------------------------------------------------
-     Called by Phaser when the car overlaps a circle.
+     Queue up the next bubble after a random pause.
+
+     This re-schedules itself rather than using one fixed repeating timer,
+     which is what lets every gap be a different length.
      ---------------------------------------------------------------- */
-  collectCoin(car, coin) {
-    // Guard: overlap can fire twice in one frame for the same circle,
+  scheduleNextBubble() {
+    if (this.deck.length === 0) return;   // that's all 200 of them
+
+    const delay = Phaser.Math.Between(CONFIG.SPAWN_MIN_MS, CONFIG.SPAWN_MAX_MS);
+
+    this.spawnTimer = this.time.delayedCall(delay, () => {
+      // If the screen is already full, skip this turn and try again after
+      // the next pause. Nothing is lost - the word stays in the deck.
+      if (this.bubbles.getLength() < CONFIG.MAX_ACTIVE_BUBBLES) this.spawnBubble();
+      this.scheduleNextBubble();
+    });
+  }
+
+
+  /* -------------------------------------------------------------------
+     Fit a word inside a bubble, shrinking the type only as much as needed.
+     ---------------------------------------------------------------- */
+  makeBubbleLabel(word, radius) {
+    // The largest rectangle we let the text occupy. Both fractions are
+    // deliberately well inside the circle: a box of half-width 0.75r and
+    // half-height 0.55r has its corners at 0.93r, so even the corners of
+    // the text stay clear of the bubble's edge.
+    const maxW = radius * 1.50;
+    const maxH = radius * 1.10;
+
+    const label = this.add.text(0, 0, word, {
+      fontFamily: CONFIG.BUBBLE_FONT,
+      fontSize: CONFIG.BUBBLE_FONT_MAX + 'px',
+      color: CONFIG.BUBBLE_TEXT_COLOR,
+      fontStyle: 'bold',
+      align: 'center',
+      stroke: CONFIG.BUBBLE_STROKE_COLOR,
+      strokeThickness: 8,
+      // Two-word phrases wrap onto a second line, which lets them stay
+      // much larger than they could as one long single line.
+      wordWrap: { width: maxW, useAdvancedWrap: true },
+      padding: { x: 6, y: 6 }
+    }).setOrigin(0.5);
+
+    // Step the size down until it fits. Phaser re-measures the text every
+    // time the style changes, so this is a real measurement each pass
+    // rather than an estimate - nothing can spill outside the bubble.
+    let size = CONFIG.BUBBLE_FONT_MAX;
+    while (size > CONFIG.BUBBLE_FONT_MIN && (label.width > maxW || label.height > maxH)) {
+      size -= 1;
+      label.setFontSize(size);
+      label.setWordWrapWidth(maxW);
+      // Keep the outline proportional, so small text doesn't get swallowed
+      // by an outline that's suddenly too heavy for it.
+      label.setStroke(CONFIG.BUBBLE_STROKE_COLOR, Math.max(4, Math.round(size * 0.23)));
+    }
+
+    return label;
+  }
+
+
+  /* -------------------------------------------------------------------
+     Create one bubble just above the top edge of the screen.
+     ---------------------------------------------------------------- */
+  spawnBubble() {
+    // Re-check the deck here, not just when the timer was set. A pause timer
+    // set while words remained can still be in flight after the last one is
+    // handed out, and popping an empty deck would spawn a bubble reading
+    // "undefined" - and let the score climb past 200.
+    if (this.deck.length === 0) return;
+
+    const W = this.scale.width;
+    const R = CONFIG.BUBBLE_RADIUS;
+
+    const word = this.deck.pop();
+
+    // Step through the colour list rather than picking at random, so two
+    // bubbles in a row are never the same colour.
+    const colour = CONFIG.BUBBLE_COLOURS[this.colourIndex % CONFIG.BUBBLE_COLOURS.length];
+    this.colourIndex++;
+
+    // Keep bubbles over the road and fully on screen. Then try a few times
+    // to avoid dropping this one straight down the same column as the last,
+    // which would make two big bubbles awkward to catch separately.
+    const minX = Math.max(R + 6, this.roadLeft + R * 0.35);
+    const maxX = Math.min(W - R - 6, this.roadRight - R * 0.35);
+
+    let x = Phaser.Math.Between(minX, maxX);
+    for (let tries = 0; tries < 6 && Math.abs(x - this.lastBubbleX) < R; tries++) {
+      x = Phaser.Math.Between(minX, maxX);
+    }
+    this.lastBubbleX = x;
+
+    // A container groups the circle, the shine and the word together, so
+    // they move - and pop - as one object.
+    const bubble = this.add.container(x, -R - 10);
+
+    const ball = this.add.circle(0, 0, R, colour);
+    ball.setStrokeStyle(5, 0xffffff, 0.95);
+
+    // A soft highlight up in the top-left sells the "bubble" look.
+    const shine = this.add.ellipse(-R * 0.34, -R * 0.40, R * 0.52, R * 0.34, 0xffffff, 0.30);
+    shine.setAngle(-25);
+
+    bubble.add([ball, shine, this.makeBubbleLabel(word, R)]);
+    bubble.setDepth(5);
+
+    // Adding it to the physics group gives it a physics body automatically.
+    this.bubbles.add(bubble);
+
+    // A round body, centred on the container, so the collision matches the
+    // artwork instead of being a square around it.
+    bubble.body.setCircle(R, -R, -R);
+    bubble.body.setAllowGravity(false);
+
+    // One shared speed for every bubble - see the note by SPAWN_MIN_MS.
+    // Identical speeds mean the spacing they spawn with is the spacing they
+    // keep, all the way down the screen.
+    bubble.body.setVelocityY(CONFIG.BUBBLE_SPEED);
+  }
+
+
+  /* -------------------------------------------------------------------
+     Called by Phaser when the car overlaps a bubble.
+     ---------------------------------------------------------------- */
+  collectBubble(car, bubble) {
+    // Guard: overlap can fire twice in one frame for the same bubble,
     // so ignore it if we've already started collecting this one.
-    if (coin.getData('collected')) return;
-    coin.setData('collected', true);
+    if (bubble.getData('collected')) return;
+    bubble.setData('collected', true);
 
-    // The circle stops moving and stops counting as a target immediately...
-    coin.body.enable = false;
-    coin.body.setVelocity(0, 0);
+    // The bubble stops moving and stops counting as a target immediately...
+    bubble.body.enable = false;
+    bubble.body.setVelocity(0, 0);
 
-    // ...then puffs out with a quick pop animation before being destroyed.
+    // ...and leaves the group straight away, so it stops counting towards
+    // the "how many are on screen" limit while its pop plays out.
+    this.bubbles.remove(bubble);
+
+    // ...then swells and fades before removing itself.
     this.tweens.add({
-      targets: coin,
-      scale: 1.8,
+      targets: bubble,
+      scale: 1.7,
       alpha: 0,
-      duration: 180,
-      onComplete: () => coin.destroy()
+      duration: 200,
+      ease: 'Quad.easeOut',
+      onComplete: () => bubble.destroy()
     });
 
-    // The happy coin "pop".
+    // The happy "pop".
     this.sfx.pop();
 
     // Score up by one.
@@ -473,11 +768,13 @@ class CarScene extends Phaser.Scene {
      A quick "pop out and settle back" on any object.
 
      Killing any tween already running on the target first matters: collect
-     two circles in quick succession and the second bounce would otherwise
+     two bubbles in quick succession and the second bounce would otherwise
      fight the first, leaving the object stranded at the wrong size.
 
-     This is purely cosmetic - an Arcade physics body keeps its original
-     size, so a bouncing car does not get a bigger collision box.
+     Worth knowing: an Arcade physics body DOES scale with its game object,
+     so for the ~80ms the car is bouncing its collision box is up to 18%
+     bigger. That only ever happens just after a pickup, and a slightly
+     generous car is no bad thing here, so we let it be.
      ---------------------------------------------------------------- */
   bounce(target, peakScale, halfDuration) {
     this.tweens.killTweensOf(target);
@@ -495,11 +792,114 @@ class CarScene extends Phaser.Scene {
 
 
   /* -------------------------------------------------------------------
+     Drop a tree somewhere on one of the two grass verges.
+     ---------------------------------------------------------------- */
+  placeTree(tree, y) {
+    const W = this.scale.width;
+
+    tree.setScale(Phaser.Math.FloatBetween(0.8, 1.15));
+
+    const half = tree.displayWidth / 2 + 2;
+    const onLeft = Math.random() < 0.5;
+
+    tree.x = onLeft
+      ? Phaser.Math.Between(half, Math.max(half, this.roadLeft - half))
+      : Phaser.Math.Between(Math.min(W - half, this.roadRight + half), W - half);
+    tree.y = y;
+  }
+
+
+  /* -------------------------------------------------------------------
+     Fade both fields to a new green.
+     ---------------------------------------------------------------- */
+  shiftFieldColour() {
+    const from = this.currentFieldColour;
+    const to = Phaser.Utils.Array.GetRandom(
+      CONFIG.FIELD_COLOURS.filter(c => c !== from));
+
+    const cFrom = Phaser.Display.Color.IntegerToColor(from);
+    const cTo   = Phaser.Display.Color.IntegerToColor(to);
+
+    // addCounter just tweens a plain number for us; we turn that number
+    // into a blend of the two colours on every frame.
+    this.tweens.addCounter({
+      from: 0,
+      to: 100,
+      duration: CONFIG.FIELD_FADE_MS,
+      onUpdate: tween => {
+        const step = Phaser.Display.Color.Interpolate.ColorWithColor(
+          cFrom, cTo, 100, tween.getValue());
+        const colour = Phaser.Display.Color.GetColor(step.r, step.g, step.b);
+        this.fieldLeft.setFillStyle(colour);
+        this.fieldRight.setFillStyle(colour);
+      },
+      onComplete: () => { this.currentFieldColour = to; }
+    });
+  }
+
+
+  /* -------------------------------------------------------------------
+     All 200 bubbles have been and gone.
+     ---------------------------------------------------------------- */
+  showFinishBanner() {
+    const W = this.scale.width;
+    const H = this.scale.height;
+
+    this.banner = this.add.container(W / 2, H * 0.40).setDepth(20);
+
+    const panel = this.add.rectangle(0, 0, W * 0.84, 240, 0x101a2e, 0.94);
+    panel.setStrokeStyle(5, 0xffd54f, 0.95);
+
+    const bigStyle = {
+      fontFamily: CONFIG.BUBBLE_FONT, fontSize: '40px', fontStyle: 'bold',
+      color: '#ffffff', stroke: CONFIG.BUBBLE_STROKE_COLOR, strokeThickness: 6,
+      align: 'center'
+    };
+
+    this.banner.add([
+      panel,
+      this.add.text(0, -66, 'All 200 done!', bigStyle).setOrigin(0.5),
+      this.add.text(0, 0, 'Score: ' + this.score, {
+        ...bigStyle, fontSize: '52px', color: '#ffd54f'
+      }).setOrigin(0.5),
+      this.add.text(0, 72, 'Tap to play again', {
+        ...bigStyle, fontSize: '26px'
+      }).setOrigin(0.5)
+    ]);
+
+    // Wait a beat before listening for the tap, so a finger still dragging
+    // the car when the card appears doesn't restart it by accident.
+    this.time.delayedCall(800, () => {
+      this.input.once('pointerdown', () => this.resetRun());
+    });
+  }
+
+
+  /* -------------------------------------------------------------------
+     Start a fresh run of 200 without reloading the scene - that way the
+     sound stays set up exactly as it is (restarting the scene would build
+     a second road hum on top of the first).
+     ---------------------------------------------------------------- */
+  resetRun() {
+    if (this.banner) {
+      this.banner.destroy();
+      this.banner = null;
+    }
+
+    this.score = 0;
+    this.scoreText.setText('Score: 0');
+    this.finished = false;
+
+    this.buildDeck();
+    this.scheduleNextBubble();
+  }
+
+
+  /* -------------------------------------------------------------------
      Runs every frame (~60 times a second).
      `delta` is milliseconds since the previous frame.
      ---------------------------------------------------------------- */
   update(time, delta) {
-    const W = this.scale.width;
     const H = this.scale.height;
 
     // --- 1. Work out where the car should be ------------------------
@@ -521,10 +921,10 @@ class CarScene extends Phaser.Scene {
       this.targetY = pointer.y - CONFIG.FINGER_OFFSET_Y;
     }
 
-    // Keep the car fully on screen, and never let it climb too high.
+    // Keep the car on the tar, and never let it climb too high.
     const halfW = CONFIG.CAR_WIDTH  / 2;
     const halfH = CONFIG.CAR_HEIGHT / 2;
-    this.targetX = Phaser.Math.Clamp(this.targetX, halfW, W - halfW);
+    this.targetX = Phaser.Math.Clamp(this.targetX, this.roadLeft + halfW, this.roadRight - halfW);
     this.targetY = Phaser.Math.Clamp(this.targetY, H * CONFIG.CAR_MIN_Y_FRAC, H - halfH);
 
     // --- 2. Glide towards that target -------------------------------
@@ -533,25 +933,36 @@ class CarScene extends Phaser.Scene {
     this.car.x = Phaser.Math.Linear(this.car.x, this.targetX, CONFIG.CAR_FOLLOW_SPEED);
     this.car.y = Phaser.Math.Linear(this.car.y, this.targetY, CONFIG.CAR_FOLLOW_SPEED);
 
-    // Park the windscreen rectangle on the upper part of the car body.
-    // It copies the car's current scale too, so during a collect-bounce the
-    // two grow together instead of the windscreen sliding out of place.
-    this.carRoof.setScale(this.car.scaleX, this.car.scaleY);
-    this.carRoof.x = this.car.x;
-    this.carRoof.y = this.car.y - CONFIG.CAR_HEIGHT * 0.20 * this.car.scaleY;
+    // --- 3. Scroll the scenery to fake forward motion ---------------
+    const scroll = CONFIG.SCROLL_SPEED * (delta / 1000);   // pixels this frame
 
-    // --- 3. Scroll the dashed centre line to fake forward motion ----
-    const dashSpeed = 160 * (delta / 1000);  // pixels this frame
     this.laneDashes.forEach(dash => {
-      dash.y += dashSpeed;
-      if (dash.y > H + 40) dash.y = -40;   // wrap back to the top
+      dash.y += scroll;
+      if (dash.y > H + 40) dash.y = -40;    // wrap back to the top
     });
 
-    // --- 4. Tidy up circles that fell off the bottom ----------------
-    // Without this they'd pile up forever and eventually slow the game down.
-    this.coins.getChildren().forEach(coin => {
-      if (coin.y > H + CONFIG.COIN_RADIUS * 2) coin.destroy();
+    this.trees.forEach(tree => {
+      tree.y += scroll * 0.85;   // a little slower than the road = depth
+      // Recycle with a random extra gap above the screen, so trees arrive
+      // occasionally rather than in a steady procession.
+      if (tree.y > H + 60) {
+        this.placeTree(tree, -60 - Phaser.Math.Between(0, CONFIG.TREE_GAP_MAX));
+      }
     });
+
+    // --- 4. Tidy up bubbles that fell off the bottom ----------------
+    // Without this they'd pile up forever and eventually slow the game down.
+    // We iterate a copy, because destroy() removes the bubble from the very
+    // array we'd otherwise be walking.
+    this.bubbles.getChildren().slice().forEach(bubble => {
+      if (bubble.y > H + CONFIG.BUBBLE_RADIUS * 2) bubble.destroy();
+    });
+
+    // --- 5. Was that the last of the 200? ---------------------------
+    if (!this.finished && this.deck.length === 0 && this.bubbles.getLength() === 0) {
+      this.finished = true;
+      this.showFinishBanner();
+    }
   }
 }
 
@@ -559,10 +970,10 @@ class CarScene extends Phaser.Scene {
 /* ---------------------------------------------------------------------
    4. BOOT THE GAME
    ------------------------------------------------------------------ */
-new Phaser.Game({
-  type: Phaser.AUTO,        // WebGL if the device supports it, else Canvas
+const game = new Phaser.Game({
+  type: Phaser.AUTO,          // WebGL if the device supports it, else Canvas
   parent: 'game',             // draw into the <div id="game">
-  backgroundColor: CONFIG.BG_COLOR,
+  backgroundColor: '#2b2f3a',
 
   scale: {
     // FIT: keep our 450x800 portrait shape and scale it to fill as much of
@@ -588,6 +999,10 @@ new Phaser.Game({
 
   scene: [CarScene]
 });
+
+// Handy when you're tinkering: open the browser console and you can reach
+// the live game, e.g.  game.scene.keys.CarScene.score
+window.game = game;
 </script>
 </body>
 </html>
