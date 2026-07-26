@@ -166,6 +166,21 @@ const CONFIG = {
 
   // 20 x 4 good + 10 x 2 bad = 100 bubbles, about two and a half minutes.
 
+  // Some of the kind words are worth more than one point. These are picked
+  // out of the 80 positives at random each run, so the same word is a jackpot
+  // one game and an ordinary catch the next - there's nothing to memorise.
+  // The rest (80 - 20 - 10 = 50) stay at +1.
+  BONUS_3_COUNT: 20,
+  BONUS_5_COUNT: 10,
+
+  // Badge colours for the bonus values, keyed by the value itself.
+  BONUS_COLOURS: { 3: 0x00bfa5, 5: 0xffb300 },   // teal, gold
+
+  // --- High scores ---
+  HIGHSCORE_KEY:  'divijs-blue-car-highscores',
+  HIGHSCORE_KEEP: 5,       // how many places the table holds
+  NAME_MAX_LEN:   10,
+
   // Bright, cheerful fills, stepped through in order so two neighbours are
   // never the same colour: sky blue, grass green, sunshine yellow, coral,
   // purple, orange, pink.
@@ -380,11 +395,19 @@ class SoundKit {
   /* The happy coin "pop": two quick notes, the second higher than the
      first. That little upward jump is what makes it sound rewarding
      rather than like an error beep. */
-  pop() {
+  pop(value = 1) {
     if (!this.enabled || this.muted) return;
 
     const ctx = this.ctx;
     const t = ctx.currentTime;
+
+    // An ordinary catch is the two-note pop. A bonus keeps climbing - three
+    // notes for +3, four for +5 - so what you hear tells you how much you
+    // just won without having to read the number.
+    const runs = { 1: [988, 1319], 3: [988, 1319, 1568], 5: [988, 1319, 1568, 2093] };
+    const notes = runs[value] || runs[1];
+    const step  = 0.055;
+
     const osc  = ctx.createOscillator();
     const gain = ctx.createGain();
 
@@ -394,21 +417,23 @@ class SoundKit {
     // doesn't sound like a machine stuck on repeat.
     osc.detune.value = Phaser.Math.FloatBetween(-15, 15);   // in cents
 
-    osc.frequency.setValueAtTime(988,  t);          // B5
-    osc.frequency.setValueAtTime(1319, t + 0.055);  // jump up to E6
+    notes.forEach((hz, i) => osc.frequency.setValueAtTime(hz, t + i * step));
+
+    // Let the tail run past the last note so the run doesn't sound cut off.
+    const tail = notes.length * step + 0.20;
 
     // The volume envelope. Ramping up from a whisper instead of starting
     // at full blast is what avoids the "click" you get from a raw tone.
     // (Exponential ramps can never reach exactly 0, hence 0.0001.)
     gain.gain.setValueAtTime(0.0001, t);
     gain.gain.exponentialRampToValueAtTime(CONFIG.POP_VOLUME, t + 0.008);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.26);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + tail);
 
     osc.connect(gain);
     gain.connect(this.master);
 
     osc.start(t);
-    osc.stop(t + 0.28);   // tidies itself up; no cleanup needed from us
+    osc.stop(t + tail + 0.02);   // tidies itself up; no cleanup needed from us
   }
 
   /* The "oops" for hitting one of the bad bubbles.
@@ -631,7 +656,62 @@ class SoundKit {
 
 
 /* ---------------------------------------------------------------------
-   3. THE GAME SCENE
+   3. HIGH SCORES
+
+   Saved in the browser's localStorage, which means they live on THIS
+   phone in THIS browser. There's no server behind the game, so scores
+   don't travel between devices and nobody else can see them.
+
+   Every call is wrapped, because localStorage is not always there to be
+   written to: private browsing refuses it, and some browsers block it
+   entirely for pages opened straight off the disk with file://. A game
+   that crashed on a locked-down browser would be a poor trade for a
+   feature that's only ever a nice-to-have.
+   ------------------------------------------------------------------ */
+function loadHighScores() {
+  try {
+    const raw = window.localStorage.getItem(CONFIG.HIGHSCORE_KEY);
+    if (!raw) return [];
+    const list = JSON.parse(raw);
+    if (!Array.isArray(list)) return [];
+
+    // Anything could be sitting under that key - a half-written entry, or
+    // something from an older version - so keep only what still makes sense.
+    return list
+      .filter(e => e && typeof e.name === 'string' && Number.isFinite(e.score))
+      .map(e => ({ name: e.name.slice(0, CONFIG.NAME_MAX_LEN), score: Math.round(e.score) }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, CONFIG.HIGHSCORE_KEEP);
+  } catch (err) {
+    return [];
+  }
+}
+
+function saveHighScores(list) {
+  try {
+    window.localStorage.setItem(CONFIG.HIGHSCORE_KEY, JSON.stringify(list));
+    return true;
+  } catch (err) {
+    return false;   // storage full, or blocked - the caller says so on screen
+  }
+}
+
+// Can we store anything at all? Checked by actually writing, because merely
+// having the object doesn't mean a write will be allowed.
+function highScoresAvailable() {
+  try {
+    const probe = CONFIG.HIGHSCORE_KEY + ':probe';
+    window.localStorage.setItem(probe, '1');
+    window.localStorage.removeItem(probe);
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+
+/* ---------------------------------------------------------------------
+   4. THE GAME SCENE
    A Phaser "Scene" is one screen of a game. We only need one.
    Phaser calls create() once at the start, then update() every frame.
    ------------------------------------------------------------------ */
@@ -923,7 +1003,11 @@ class CarScene extends Phaser.Scene {
     // ends have to be checked now that the score can go negative: the minus
     // sign makes "-20" wider than "80".
     // Catch every good one and none of the bad; then the exact opposite.
-    const best  = CONFIG.WORDS.length * CONFIG.REPEATS_PER_WORD;
+    // The bonuses matter here: a perfect run is now 160, not 80.
+    const positives = CONFIG.WORDS.length * CONFIG.REPEATS_PER_WORD;
+    const best = (positives - CONFIG.BONUS_3_COUNT - CONFIG.BONUS_5_COUNT)
+               + CONFIG.BONUS_3_COUNT * 3
+               + CONFIG.BONUS_5_COUNT * 5;
     const worst = -CONFIG.BAD_WORDS.length * CONFIG.BAD_REPEATS_PER_WORD * CONFIG.BAD_PENALTY;
 
     this.scoreText.setText('Score: ' + best);
@@ -1126,6 +1210,61 @@ class CarScene extends Phaser.Scene {
     this.input.once('pointerdown', dismissHint);
     this.time.delayedCall(6000, dismissHint);
 
+    // --- A second hint, pointing at the speed selector ---------------
+    // Kept separate from the driving hint because it has to outlive it: the
+    // first touch is a child grabbing the car, long before they've noticed
+    // there's a speed control at all.
+    this.speedHint = this.add.container(0, 0).setDepth(9);
+
+    const speedWord = this.add.text(258, 470, 'Speed', {
+      fontFamily: CONFIG.BUBBLE_FONT,
+      fontSize: '38px',
+      fontStyle: 'bold',
+      color: '#ffffff',
+      stroke: CONFIG.BUBBLE_STROKE_COLOR,
+      strokeThickness: 6
+    }).setOrigin(0.5);
+
+    // An arrow drawn from the word down to the knob. Working the head out
+    // from the line's own direction means the two can never disagree, however
+    // the endpoints are moved.
+    const from = new Phaser.Math.Vector2(206, 495);
+    const to   = new Phaser.Math.Vector2(86, 646);
+    const dir  = to.clone().subtract(from).normalize();
+    const perp = new Phaser.Math.Vector2(-dir.y, dir.x);
+    const base = to.clone().subtract(dir.clone().scale(26));
+
+    const arrow = this.add.graphics();
+    arrow.lineStyle(7, 0xffffff, 0.92);
+    arrow.beginPath();
+    arrow.moveTo(from.x, from.y);
+    arrow.lineTo(base.x, base.y);
+    arrow.strokePath();
+    arrow.fillStyle(0xffffff, 0.92);
+    arrow.fillTriangle(
+      to.x, to.y,
+      base.x + perp.x * 14, base.y + perp.y * 14,
+      base.x - perp.x * 14, base.y - perp.y * 14
+    );
+
+    this.speedHint.add([speedWord, arrow]);
+
+    this.tweens.add({
+      targets: this.speedHint, alpha: 0.35, duration: 900, yoyo: true, repeat: -1
+    });
+
+    // It has done its job the moment the speed is changed, so that dismisses
+    // it. Otherwise it gives up after a while on its own.
+    this.dismissSpeedHint = () => {
+      if (!this.speedHint || !this.speedHint.scene) return;
+      this.tweens.killTweensOf(this.speedHint);
+      this.tweens.add({
+        targets: this.speedHint, alpha: 0, duration: 400,
+        onComplete: () => { this.speedHint.destroy(); this.speedHint = null; }
+      });
+    };
+    this.time.delayedCall(12000, () => this.dismissSpeedHint());
+
     // Where the car is trying to get to. Starts at its current position so
     // it doesn't lurch anywhere before the first touch.
     this.targetX = this.car.x;
@@ -1155,11 +1294,26 @@ class CarScene extends Phaser.Scene {
     // Each entry carries its own flag rather than us keeping two lists and
     // trying to interleave them - shuffling one mixed deck is what makes the
     // bad ones arrive unpredictably instead of on a rhythm.
+    //
+    // `value` is the score change, so one number covers every case: +1 for
+    // an ordinary kind word, +3 or +5 for a bonus, negative for a bad one.
     for (let round = 0; round < CONFIG.REPEATS_PER_WORD; round++) {
-      for (const word of CONFIG.WORDS) this.deck.push({ word, bad: false });
+      for (const word of CONFIG.WORDS) this.deck.push({ word, bad: false, value: 1 });
     }
+
+    // Promote a random handful of the positives to bonuses. Shuffling first
+    // and then taking from the front is the same as picking at random, but
+    // can't land on the same bubble twice.
+    Phaser.Utils.Array.Shuffle(this.deck);
+    const bonus3 = Math.min(CONFIG.BONUS_3_COUNT, this.deck.length);
+    const bonus5 = Math.min(CONFIG.BONUS_5_COUNT, this.deck.length - bonus3);
+    for (let i = 0; i < bonus3; i++) this.deck[i].value = 3;
+    for (let i = 0; i < bonus5; i++) this.deck[bonus3 + i].value = 5;
+
     for (let round = 0; round < CONFIG.BAD_REPEATS_PER_WORD; round++) {
-      for (const word of CONFIG.BAD_WORDS) this.deck.push({ word, bad: true });
+      for (const word of CONFIG.BAD_WORDS) {
+        this.deck.push({ word, bad: true, value: -CONFIG.BAD_PENALTY });
+      }
     }
 
     Phaser.Utils.Array.Shuffle(this.deck);
@@ -1201,7 +1355,13 @@ class CarScene extends Phaser.Scene {
   }
 
   setGear(gear, animate = true) {
+    const previous = this.gear;
     this.gear = Phaser.Math.Clamp(gear, 1, CONFIG.GEAR_SPEEDS.length);
+
+    // The speed hint has served its purpose the moment the speed changes.
+    if (previous !== undefined && previous !== this.gear && this.dismissSpeedHint) {
+      this.dismissSpeedHint();
+    }
 
     const y = this.gearDetentY(this.gear);
     this.sliderKnob.setFillStyle(CONFIG.GEAR_COLOURS[this.gear - 1]);
@@ -1250,13 +1410,16 @@ class CarScene extends Phaser.Scene {
   /* -------------------------------------------------------------------
      Fit a word inside a bubble, shrinking the type only as much as needed.
      ---------------------------------------------------------------- */
-  makeBubbleLabel(word, radius) {
+  makeBubbleLabel(word, radius, heightFrac = 1.10) {
     // The largest rectangle we let the text occupy. Both fractions are
     // deliberately well inside the circle: a box of half-width 0.75r and
     // half-height 0.55r has its corners at 0.93r, so even the corners of
     // the text stay clear of the bubble's edge.
+    //
+    // Bonus bubbles pass a smaller heightFrac, because the value badge takes
+    // the bottom of the circle and the word has to give way to it.
     const maxW = radius * 1.50;
-    const maxH = radius * 1.10;
+    const maxH = radius * heightFrac;
 
     const label = this.add.text(0, 0, word, {
       fontFamily: CONFIG.BUBBLE_FONT,
@@ -1302,7 +1465,8 @@ class CarScene extends Phaser.Scene {
     const W = this.scale.width;
     const R = CONFIG.BUBBLE_RADIUS;
 
-    const { word, bad } = this.deck.pop();
+    const { word, bad, value } = this.deck.pop();
+    const bonus = !bad && value > 1;
 
     // Good bubbles step through the bright colour list rather than picking at
     // random, so two in a row are never the same. Bad ones are always the one
@@ -1352,14 +1516,44 @@ class CarScene extends Phaser.Scene {
     // outer one is what physics drives; the inner one is free to drift about
     // for the floating effect without ever moving the collision circle.
     const inner = this.add.container(0, 0);
-    inner.add([ball, this.makeBubbleLabel(word, R)]);
+
+    // A bonus bubble gives up some of its height to the badge, and lifts the
+    // word to sit above it rather than through it.
+    const label = this.makeBubbleLabel(word, R, bonus ? 0.74 : 1.10);
+    if (bonus) label.y = -R * 0.14;
+
+    inner.add([ball, label]);
     if (shine) inner.addAt(shine, 1);   // between the ball and the word
+
+    if (bonus) {
+      // A coin in the lower half carrying what the bubble is worth. Round
+      // rather than a pill so it reads as something to collect.
+      const badgeY = R * 0.58;
+      inner.add(
+        this.add.circle(0, badgeY, 23, CONFIG.BONUS_COLOURS[value])
+          .setStrokeStyle(3, 0xffffff, 0.95)
+      );
+      inner.add(
+        this.add.text(0, badgeY, '+' + value, {
+          fontFamily: CONFIG.BUBBLE_FONT,
+          fontSize: '24px',
+          fontStyle: 'bold',
+          color: '#ffffff',
+          stroke: CONFIG.BUBBLE_STROKE_COLOR,
+          strokeThickness: 4
+        }).setOrigin(0.5)
+      );
+
+      // A gold rim as well, so it's spottable before the badge is readable.
+      ball.setStrokeStyle(7, 0xffd54f, 0.95);
+    }
 
     bubble.add(inner);
     bubble.setDepth(5);
     bubble.setData('inner', inner);
     bubble.setData('colour', colour);
     bubble.setData('bad', bad);
+    bubble.setData('value', value);
     bubble.setData('phase', Phaser.Math.FloatBetween(0, Math.PI * 2));
 
     // Swell into view rather than simply appearing at the top edge.
@@ -1402,11 +1596,12 @@ class CarScene extends Phaser.Scene {
     this.bubbles.remove(bubble);
 
     const bad = bubble.getData('bad');
+    const value = bubble.getData('value');
 
     // Scatter a handful of bits in the bubble's own colour, and float the
     // score change up from where it was hit.
     this.burst(bubble.x, bubble.y, bubble.getData('colour'));
-    this.scorePopup(bubble.x, bubble.y, bad);
+    this.scorePopup(bubble.x, bubble.y, value);
 
     // Drop the entrance tween if it's somehow still running, or it would
     // fight the pop below and the bubble would never finish shrinking.
@@ -1427,12 +1622,14 @@ class CarScene extends Phaser.Scene {
       // like a bump rather than a reward.
       this.sfx.thud();
       this.cameras.main.shake(200, 0.009);
-      this.score -= CONFIG.BAD_PENALTY;   // allowed to go below zero
     } else {
-      this.sfx.pop();
-      this.score += 1;
+      // Bonus bubbles get a brighter, longer chime than an ordinary catch,
+      // so a big one sounds like a big one.
+      this.sfx.pop(value);
     }
 
+    // One line covers every case: value is +1, +3, +5 or negative.
+    this.score += value;
     this.scoreText.setText('Score: ' + this.score);
 
     // Turn the number red once it's in the negative, so a dropping score is
@@ -1482,12 +1679,19 @@ class CarScene extends Phaser.Scene {
   /* -------------------------------------------------------------------
      A "+1" that drifts up from wherever the bubble was caught.
      ---------------------------------------------------------------- */
-  scorePopup(x, y, bad) {
-    const label = this.add.text(x, y, bad ? '-' + CONFIG.BAD_PENALTY : '+1', {
+  scorePopup(x, y, value) {
+    // Bigger wins get bigger, brighter numbers - the feedback should scale
+    // with what was actually earned.
+    const colour = value < 0 ? CONFIG.SCORE_NEG_COLOR
+                 : value >= 5 ? '#ffd54f'
+                 : value >= 3 ? '#5ce6d0'
+                 : '#ffffff';
+
+    const label = this.add.text(x, y, (value > 0 ? '+' : '') + value, {
       fontFamily: CONFIG.BUBBLE_FONT,
-      fontSize: '38px',
+      fontSize: (value > 1 ? 52 : 38) + 'px',
       fontStyle: 'bold',
-      color: bad ? CONFIG.SCORE_NEG_COLOR : '#ffffff',
+      color: colour,
       stroke: CONFIG.BUBBLE_STROKE_COLOR,
       strokeThickness: 7
     }).setOrigin(0.5).setDepth(11);
@@ -1614,36 +1818,160 @@ class CarScene extends Phaser.Scene {
 
 
   /* -------------------------------------------------------------------
-     All 200 bubbles have been and gone.
+     Every bubble has been and gone: show the result and the table.
      ---------------------------------------------------------------- */
   showFinishBanner() {
     const W = this.scale.width;
     const H = this.scale.height;
 
-    this.banner = this.add.container(W / 2, H * 0.40).setDepth(20);
+    this.banner = this.add.container(W / 2, H * 0.44).setDepth(20);
 
-    const panel = this.add.rectangle(0, 0, W * 0.84, 240, 0x101a2e, 0.94);
+    const panel = this.add.rectangle(0, 0, W * 0.90, 480, 0x101a2e, 0.96);
     panel.setStrokeStyle(5, 0xffd54f, 0.95);
 
-    const bigStyle = {
-      fontFamily: CONFIG.BUBBLE_FONT, fontSize: '40px', fontStyle: 'bold',
+    this.titleStyle = {
+      fontFamily: CONFIG.BUBBLE_FONT, fontStyle: 'bold',
       color: '#ffffff', stroke: CONFIG.BUBBLE_STROKE_COLOR, strokeThickness: 6,
       align: 'center'
     };
 
     this.banner.add([
       panel,
-      this.add.text(0, -66, 'All ' + this.totalBubbles + ' done!', bigStyle).setOrigin(0.5),
-      this.add.text(0, 0, 'Score: ' + this.score, {
-        ...bigStyle, fontSize: '52px', color: '#ffd54f'
-      }).setOrigin(0.5),
-      this.add.text(0, 72, 'Tap to play again', {
-        ...bigStyle, fontSize: '26px'
-      }).setOrigin(0.5)
+      this.add.text(0, -206, 'All ' + this.totalBubbles + ' done!',
+                    { ...this.titleStyle, fontSize: '34px' }).setOrigin(0.5),
+      this.add.text(0, -158, 'Score: ' + this.score,
+                    { ...this.titleStyle, fontSize: '48px', color: '#ffd54f' }).setOrigin(0.5)
     ]);
 
-    // Wait a beat before listening for the tap, so a finger still dragging
-    // the car when the card appears doesn't restart it by accident.
+    const scores = loadHighScores();
+
+    // You make the table if there's still a free place, or if you've beaten
+    // whoever is currently bottom of it.
+    const madeTheTable = highScoresAvailable()
+      && (scores.length < CONFIG.HIGHSCORE_KEEP
+          || this.score > scores[scores.length - 1].score);
+
+    if (madeTheTable) {
+      this.showNameEntry(scores);
+    } else {
+      this.showTable(scores, highScoresAvailable()
+        ? null : 'This browser will not save scores');
+      this.armRestart();
+    }
+  }
+
+
+  /* -------------------------------------------------------------------
+     Ask who just played.
+
+     A real <input> rather than letters picked with arrows, because it
+     brings up the phone's own keyboard - much easier for a grown-up
+     typing on a child's behalf. Phaser positions DOM elements in game
+     coordinates, so it stays put however the canvas is scaled.
+     ---------------------------------------------------------------- */
+  showNameEntry(scores) {
+    this.banner.add(
+      this.add.text(0, -104, 'New high score!',
+                    { ...this.titleStyle, fontSize: '26px', color: '#5ce6d0' }).setOrigin(0.5)
+    );
+
+    const bannerY = this.banner.y;
+
+    this.nameInput = this.add.dom(this.banner.x, bannerY - 52).createFromHTML(
+      '<input type="text" maxlength="' + CONFIG.NAME_MAX_LEN + '" placeholder="Your name" ' +
+      'style="width:210px;height:44px;font-size:22px;text-align:center;' +
+      'border-radius:10px;border:3px solid #ffd54f;background:#f6f8ff;color:#101828;' +
+      'font-family:Arial,Helvetica,sans-serif;outline:none;">'
+    ).setDepth(21);
+
+    const saveBtn = this.add.rectangle(0, 8, 200, 52, 0x4caf50)
+      .setStrokeStyle(4, 0xffffff, 0.9)
+      .setInteractive({ useHandCursor: true });
+
+    const saveLabel = this.add.text(0, 8, 'Save',
+      { ...this.titleStyle, fontSize: '28px' }).setOrigin(0.5);
+
+    this.banner.add([saveBtn, saveLabel]);
+
+    saveBtn.on('pointerdown', () => {
+      const el = this.nameInput.node.querySelector('input');
+      const typed = (el && el.value ? el.value : '').trim().slice(0, CONFIG.NAME_MAX_LEN);
+
+      const entry = { name: typed || 'Player', score: this.score };
+      const updated = scores.concat(entry)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, CONFIG.HIGHSCORE_KEEP);
+
+      const stored = saveHighScores(updated);
+
+      // Tear the form down before redrawing, or the input floats over the
+      // table it's been replaced by.
+      this.nameInput.destroy();
+      this.nameInput = null;
+      saveBtn.destroy();
+      saveLabel.destroy();
+
+      this.showTable(updated, stored ? null : 'Could not save on this browser', entry);
+      this.armRestart();
+    });
+  }
+
+
+  /* -------------------------------------------------------------------
+     Draw the standings into the card.
+     ---------------------------------------------------------------- */
+  showTable(scores, warning, justAdded) {
+    let y = -104;
+
+    this.banner.add(
+      this.add.text(0, y, 'Best scores',
+                    { ...this.titleStyle, fontSize: '24px', color: '#9aa4b8' }).setOrigin(0.5)
+    );
+    y += 38;
+
+    if (scores.length === 0) {
+      this.banner.add(
+        this.add.text(0, y, 'No scores yet',
+                      { ...this.titleStyle, fontSize: '22px', color: '#9aa4b8' }).setOrigin(0.5)
+      );
+      y += 34;
+    }
+
+    scores.forEach((entry, i) => {
+      // Highlight the run that just finished, so it's obvious where you
+      // landed among the rest.
+      const isMine = justAdded && entry.name === justAdded.name
+                   && entry.score === justAdded.score;
+      const colour = isMine ? '#ffd54f' : '#ffffff';
+
+      const row = { ...this.titleStyle, fontSize: '24px', color: colour, strokeThickness: 4 };
+
+      this.banner.add([
+        this.add.text(-150, y, (i + 1) + '.', row).setOrigin(0, 0.5),
+        this.add.text(-112, y, entry.name, row).setOrigin(0, 0.5),
+        this.add.text(150, y, String(entry.score), row).setOrigin(1, 0.5)
+      ]);
+      y += 34;
+    });
+
+    if (warning) {
+      this.banner.add(
+        this.add.text(0, y + 6, warning,
+                      { ...this.titleStyle, fontSize: '17px', color: '#ff9d9d',
+                        strokeThickness: 3 }).setOrigin(0.5)
+      );
+    }
+
+    this.banner.add(
+      this.add.text(0, 208, 'Tap to play again',
+                    { ...this.titleStyle, fontSize: '24px' }).setOrigin(0.5)
+    );
+  }
+
+
+  // Wait a beat before listening for the tap, so a finger still dragging the
+  // car when the card appears doesn't restart it by accident.
+  armRestart() {
     this.time.delayedCall(800, () => {
       this.input.once('pointerdown', () => this.resetRun());
     });
@@ -1659,6 +1987,13 @@ class CarScene extends Phaser.Scene {
     if (this.banner) {
       this.banner.destroy();
       this.banner = null;
+    }
+
+    // The name box lives outside the card (it's a real DOM element), so it
+    // has to be cleared away separately or it would hang over the new run.
+    if (this.nameInput) {
+      this.nameInput.destroy();
+      this.nameInput = null;
     }
 
     this.score = 0;
@@ -1891,6 +2226,11 @@ const game = new Phaser.Game({
     activePointer: true,
     touch: { capture: true }   // stop the browser stealing the touch events
   },
+
+  // Lets the name box be a real <input> laid over the canvas, so typing a
+  // name brings up the phone's own keyboard. Phaser keeps it positioned in
+  // game coordinates however the canvas is scaled.
+  dom: { createContainer: true },
 
   scene: [CarScene]
 });

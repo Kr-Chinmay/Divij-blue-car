@@ -15,8 +15,25 @@ a point, and the score can go below zero.
 Each bad word mirrors a good one — *Snatch* against *Share*, *Give Up* against
 *Keep Going*, *Speak Lies* against *Honest* — so the pairs teach the contrast.
 
+Thirty of the kind bubbles are worth more than one point — twenty at **+3** and
+ten at **+5**. They carry a coloured coin showing the value and wear a gold rim,
+and the collect chime climbs higher the more the bubble was worth. Which words
+get the bonuses is decided fresh each run, so there's nothing to memorise. A
+perfect run is 160.
+
 A full run is 100 bubbles: each kind word four times, each bad one twice, in a
-random order. When they're done you get a "well done" card and can go again.
+random order. When they're done you get a card with your score and the best
+scores so far, and can go again.
+
+### High scores
+
+The top five scores are kept, with a name typed in when you make the table.
+They're stored in the browser's own storage, which means they live on **that
+phone in that browser** — there's no server behind the game, so scores don't
+travel between devices and nobody else can see them. If the browser refuses to
+store anything (private browsing does, and some browsers block it for pages
+opened straight off the disk), the game says so on the card and carries on
+without saving.
 
 Each pickup gives a coin-style pop, a burst of colour, a floating "+1", a quick
 squeeze of the car and a bouncing score. Underneath there's a soft road hum and
@@ -104,8 +121,11 @@ A couple of good first knobs:
   eager driver charge up and catch words sooner.
 - `GAP_MIN_PX` / `GAP_MAX_PX` — road travelled between bubbles. Lower for more
   of them, but never below `BUBBLE_RADIUS × 2` or they start overlapping.
-- `GEAR_SPEEDS` — the speed behind each gear, currently `[1, 1.5, 2.1]`. Add a
-  fourth number and a fourth notch appears on the selector automatically.
+- `GEAR_SPEEDS` — the speed behind each setting, currently `[1, 1.5, 2.1]`. Add
+  a fourth number and a fourth notch appears on the selector automatically.
+- `BONUS_3_COUNT` / `BONUS_5_COUNT` — how many of the 80 positives are worth
+  +3 and +5. The rest stay at +1.
+- `HIGHSCORE_KEEP` — how many places the table holds, currently 5.
 - `CAR_FOLLOW_SPEED` — higher is twitchier, lower is floatier.
 - `HUM_VOLUME` / `ENGINE_VOLUME` — set either to `0` to drop that sound.
 - `ENGINE_BASE_HZ` — the engine's idle pitch; lower sounds like a bigger car,
