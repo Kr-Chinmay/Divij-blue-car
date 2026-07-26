@@ -133,15 +133,25 @@ const CONFIG = {
 
   BUBBLE_SPEED: 218,   // downward drift, pixels per second
 
-  // The 20 kind words. Each one appears exactly REPEATS_PER_WORD times,
-  // so 20 x 10 = 200 bubbles in a full run.
+  // The 20 kind words - the ones to CATCH.
   WORDS: [
     'Kind', 'Share', 'Help', 'Thank you', 'Sorry',
     'Gentle', 'Brave', 'Try Again', 'Patient', 'Calm',
     'Learn', 'Focus', 'Practice', 'Happy', 'Grateful',
     'Believe', 'Faith', 'Honest', 'I can', 'Keep Going'
   ],
-  REPEATS_PER_WORD: 10,
+  REPEATS_PER_WORD: 4,
+
+  // The 10 things to AVOID. Each one mirrors a kind word above - Snatch
+  // against Share, Give Up against Keep Going - so the pairs teach the
+  // contrast rather than just adding more words.
+  BAD_WORDS: [
+    'Shout', 'Get Angry', 'Fight', 'Speak Lies', 'Snatch',
+    'Tease', 'Give Up', 'Blame Others', 'Interrupt', 'Complain'
+  ],
+  BAD_REPEATS_PER_WORD: 2,
+
+  // 20 x 4 good + 10 x 2 bad = 100 bubbles, about two and a half minutes.
 
   // Bright, cheerful fills, stepped through in order so two neighbours are
   // never the same colour: sky blue, grass green, sunshine yellow, coral,
@@ -150,6 +160,23 @@ const CONFIG = {
     0x4fc3f7, 0x66bb6a, 0xffd54f, 0xff7f6b,
     0xab7df6, 0xffa726, 0xff8ac4
   ],
+
+  // Bad bubbles are storm grey AND spiky - different in colour and in
+  // shape, so they read as "avoid" before the word has been read at all.
+  // That matters at five, when reacting is quicker than reading, and it
+  // still works for a child who is colour-blind.
+  BAD_COLOUR:      0x4a4f5e,
+  BAD_EDGE_COLOUR: 0x8b95a8,
+  BAD_SPIKES:      13,
+  BAD_INNER_FRAC:  0.82,   // where the spike valleys sit, as a fraction of R
+
+  // Hitting one costs a point, and the score IS allowed to go below zero.
+  BAD_PENALTY: 1,
+
+  // Its collision circle is a little smaller than the spikes look, so a
+  // near miss counts as a miss. Being generous about the thing you want
+  // the player to dodge is the right way round.
+  BAD_HITBOX_FRAC: 0.86,
 
   // Word styling. Legibility first: white letters, thick dark outline, so
   // the text reads against every one of the bubble colours above.
@@ -211,6 +238,8 @@ const CONFIG = {
   GAUGE_MAX_KPH:  120,   // full deflection
 
   // --- Score display ---
+  SCORE_COLOR:     '#ffd23f',   // normal
+  SCORE_NEG_COLOR: '#ff6b6b',   // once the score has dropped below zero
   SCORE_FONT_SIZE:    '54px',
   SCORE_BOUNCE_SCALE: 1.55,   // how big the score swells when it goes up
   CAR_BOUNCE_SCALE:   1.18,   // how big the car pops when it collects one
@@ -296,6 +325,42 @@ class SoundKit {
 
     osc.start(t);
     osc.stop(t + 0.28);   // tidies itself up; no cleanup needed from us
+  }
+
+  /* The "oops" for hitting one of the bad bubbles.
+
+     Deliberately the pop turned upside down: where the pop jumps UP to a
+     brighter note, this slides DOWN to a duller one. That falling shape is
+     what our ears read as "no" - and it's kept short and soft so it lands
+     as a bump rather than as something to be upset by. */
+  thud() {
+    if (!this.enabled || this.muted) return;
+
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const osc  = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    // A filter takes the buzz off the sawtooth, leaving something closer to
+    // a wooden knock than an error beep.
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 900;
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(300, t);
+    osc.frequency.exponentialRampToValueAtTime(120, t + 0.20);   // slide down
+
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(CONFIG.POP_VOLUME * 0.85, t + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.30);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.master);
+
+    osc.start(t);
+    osc.stop(t + 0.32);
   }
 
   /* A soft, continuous road hum sitting under everything. It's white noise
@@ -712,9 +777,17 @@ class CarScene extends Phaser.Scene {
     // bright one sliding behind bare text made both unreadable.
     //
     // Size it from the widest string the score will ever be, measured rather
-    // than guessed, so changing the font size doesn't break the fit.
-    this.scoreText.setText('Score: 200');
-    const chipW = this.scoreText.width + 28;
+    // than guessed, so changing the font size doesn't break the fit. Both
+    // ends have to be checked now that the score can go negative: the minus
+    // sign makes "-20" wider than "80".
+    // Catch every good one and none of the bad; then the exact opposite.
+    const best  = CONFIG.WORDS.length * CONFIG.REPEATS_PER_WORD;
+    const worst = -CONFIG.BAD_WORDS.length * CONFIG.BAD_REPEATS_PER_WORD * CONFIG.BAD_PENALTY;
+
+    this.scoreText.setText('Score: ' + best);
+    const wBest = this.scoreText.width;
+    this.scoreText.setText('Score: ' + worst);
+    const chipW = Math.max(wBest, this.scoreText.width) + 28;
     const chipH = this.scoreText.height + 12;
     this.scoreText.setText('Score: 0');
 
@@ -848,10 +921,22 @@ class CarScene extends Phaser.Scene {
      ---------------------------------------------------------------- */
   buildDeck() {
     this.deck = [];
+
+    // Each entry carries its own flag rather than us keeping two lists and
+    // trying to interleave them - shuffling one mixed deck is what makes the
+    // bad ones arrive unpredictably instead of on a rhythm.
     for (let round = 0; round < CONFIG.REPEATS_PER_WORD; round++) {
-      this.deck = this.deck.concat(CONFIG.WORDS);
+      for (const word of CONFIG.WORDS) this.deck.push({ word, bad: false });
     }
+    for (let round = 0; round < CONFIG.BAD_REPEATS_PER_WORD; round++) {
+      for (const word of CONFIG.BAD_WORDS) this.deck.push({ word, bad: true });
+    }
+
     Phaser.Utils.Array.Shuffle(this.deck);
+
+    // Remembered so the finish card can say how many there were without the
+    // number being written down in two places.
+    this.totalBubbles = this.deck.length;
   }
 
 
@@ -924,18 +1009,24 @@ class CarScene extends Phaser.Scene {
     // Re-check the deck here, not just when the timer was set. A pause timer
     // set while words remained can still be in flight after the last one is
     // handed out, and popping an empty deck would spawn a bubble reading
-    // "undefined" - and let the score climb past 200.
+    // "undefined" - and let the score keep moving after the run had ended.
     if (this.deck.length === 0) return;
 
     const W = this.scale.width;
     const R = CONFIG.BUBBLE_RADIUS;
 
-    const word = this.deck.pop();
+    const { word, bad } = this.deck.pop();
 
-    // Step through the colour list rather than picking at random, so two
-    // bubbles in a row are never the same colour.
-    const colour = CONFIG.BUBBLE_COLOURS[this.colourIndex % CONFIG.BUBBLE_COLOURS.length];
-    this.colourIndex++;
+    // Good bubbles step through the bright colour list rather than picking at
+    // random, so two in a row are never the same. Bad ones are always the one
+    // storm grey - they should be instantly recognisable, not varied.
+    let colour;
+    if (bad) {
+      colour = CONFIG.BAD_COLOUR;
+    } else {
+      colour = CONFIG.BUBBLE_COLOURS[this.colourIndex % CONFIG.BUBBLE_COLOURS.length];
+      this.colourIndex++;
+    }
 
     // Keep bubbles over the road and fully on screen. Then try a few times
     // to avoid dropping this one straight down the same column as the last,
@@ -953,23 +1044,35 @@ class CarScene extends Phaser.Scene {
     // they move - and pop - as one object.
     const bubble = this.add.container(x, -R - 10);
 
-    const ball = this.add.circle(0, 0, R, colour);
-    ball.setStrokeStyle(5, 0xffffff, 0.95);
+    // Good ones are smooth circles with a soft highlight; bad ones are
+    // thorny stars with no shine. A Star shape whose inner radius is most of
+    // its outer one reads as a spiky circle rather than a cartoon star.
+    let ball, shine;
 
-    // A soft highlight up in the top-left sells the "bubble" look.
-    const shine = this.add.ellipse(-R * 0.34, -R * 0.40, R * 0.52, R * 0.34, 0xffffff, 0.30);
-    shine.setAngle(-25);
+    if (bad) {
+      ball = this.add.star(0, 0, CONFIG.BAD_SPIKES, R * CONFIG.BAD_INNER_FRAC, R, colour);
+      ball.setStrokeStyle(4, CONFIG.BAD_EDGE_COLOUR, 0.95);
+    } else {
+      ball = this.add.circle(0, 0, R, colour);
+      ball.setStrokeStyle(5, 0xffffff, 0.95);
+
+      // A soft highlight up in the top-left sells the "bubble" look.
+      shine = this.add.ellipse(-R * 0.34, -R * 0.40, R * 0.52, R * 0.34, 0xffffff, 0.30);
+      shine.setAngle(-25);
+    }
 
     // The artwork goes in a second container nested inside the first. The
     // outer one is what physics drives; the inner one is free to drift about
     // for the floating effect without ever moving the collision circle.
     const inner = this.add.container(0, 0);
-    inner.add([ball, shine, this.makeBubbleLabel(word, R)]);
+    inner.add([ball, this.makeBubbleLabel(word, R)]);
+    if (shine) inner.addAt(shine, 1);   // between the ball and the word
 
     bubble.add(inner);
     bubble.setDepth(5);
     bubble.setData('inner', inner);
     bubble.setData('colour', colour);
+    bubble.setData('bad', bad);
     bubble.setData('phase', Phaser.Math.FloatBetween(0, Math.PI * 2));
 
     // Swell into view rather than simply appearing at the top edge.
@@ -980,8 +1083,10 @@ class CarScene extends Phaser.Scene {
     this.bubbles.add(bubble);
 
     // A round body, centred on the container, so the collision matches the
-    // artwork instead of being a square around it.
-    bubble.body.setCircle(R, -R, -R);
+    // artwork instead of being a square around it. Bad ones get a slightly
+    // smaller circle than they look, so a near miss counts as a miss.
+    const bodyR = bad ? R * CONFIG.BAD_HITBOX_FRAC : R;
+    bubble.body.setCircle(bodyR, -bodyR, -bodyR);
     bubble.body.setAllowGravity(false);
 
     // One shared speed for every bubble - see the note by SPAWN_MIN_MS.
@@ -1008,10 +1113,12 @@ class CarScene extends Phaser.Scene {
     // the "how many are on screen" limit while its pop plays out.
     this.bubbles.remove(bubble);
 
-    // Scatter a handful of bits in the bubble's own colour, and float a
-    // "+1" up from where it was caught.
+    const bad = bubble.getData('bad');
+
+    // Scatter a handful of bits in the bubble's own colour, and float the
+    // score change up from where it was hit.
     this.burst(bubble.x, bubble.y, bubble.getData('colour'));
-    this.scorePopup(bubble.x, bubble.y);
+    this.scorePopup(bubble.x, bubble.y, bad);
 
     // Drop the entrance tween if it's somehow still running, or it would
     // fight the pop below and the bubble would never finish shrinking.
@@ -1027,12 +1134,22 @@ class CarScene extends Phaser.Scene {
       onComplete: () => bubble.destroy()
     });
 
-    // The happy "pop".
-    this.sfx.pop();
+    if (bad) {
+      // A dull thud and a jolt of the camera, so hitting a bad one feels
+      // like a bump rather than a reward.
+      this.sfx.thud();
+      this.cameras.main.shake(200, 0.009);
+      this.score -= CONFIG.BAD_PENALTY;   // allowed to go below zero
+    } else {
+      this.sfx.pop();
+      this.score += 1;
+    }
 
-    // Score up by one.
-    this.score += 1;
     this.scoreText.setText('Score: ' + this.score);
+
+    // Turn the number red once it's in the negative, so a dropping score is
+    // obvious at a glance rather than needing the minus sign to be spotted.
+    this.scoreText.setColor(this.score < 0 ? CONFIG.SCORE_NEG_COLOR : CONFIG.SCORE_COLOR);
 
     // Two bits of visual feedback: the number swells, and the car itself
     // gives a quick squeeze - so you feel the pickup even if you're
@@ -1077,12 +1194,12 @@ class CarScene extends Phaser.Scene {
   /* -------------------------------------------------------------------
      A "+1" that drifts up from wherever the bubble was caught.
      ---------------------------------------------------------------- */
-  scorePopup(x, y) {
-    const label = this.add.text(x, y, '+1', {
+  scorePopup(x, y, bad) {
+    const label = this.add.text(x, y, bad ? '-' + CONFIG.BAD_PENALTY : '+1', {
       fontFamily: CONFIG.BUBBLE_FONT,
       fontSize: '38px',
       fontStyle: 'bold',
-      color: '#ffffff',
+      color: bad ? CONFIG.SCORE_NEG_COLOR : '#ffffff',
       stroke: CONFIG.BUBBLE_STROKE_COLOR,
       strokeThickness: 7
     }).setOrigin(0.5).setDepth(11);
@@ -1228,7 +1345,7 @@ class CarScene extends Phaser.Scene {
 
     this.banner.add([
       panel,
-      this.add.text(0, -66, 'All 200 done!', bigStyle).setOrigin(0.5),
+      this.add.text(0, -66, 'All ' + this.totalBubbles + ' done!', bigStyle).setOrigin(0.5),
       this.add.text(0, 0, 'Score: ' + this.score, {
         ...bigStyle, fontSize: '52px', color: '#ffd54f'
       }).setOrigin(0.5),
@@ -1258,6 +1375,7 @@ class CarScene extends Phaser.Scene {
 
     this.score = 0;
     this.scoreText.setText('Score: 0');
+    this.scoreText.setColor(CONFIG.SCORE_COLOR);   // clear any red from last run
     this.finished = false;
 
     this.buildDeck();

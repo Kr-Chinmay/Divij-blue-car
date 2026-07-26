@@ -4,8 +4,18 @@ A gentle browser game for phones. Drag the blue car down a country road and
 drive into the floating bubbles to score points. No obstacles, no timer, no way
 to lose.
 
-Each bubble carries one of twenty kind words — *Kind*, *Share*, *Brave*,
-*Keep Going* and so on. A full run is 200 bubbles: every word ten times, in a
+Most bubbles carry one of twenty kind words — *Kind*, *Share*, *Brave*,
+*Keep Going* and so on. Catch those.
+
+Mixed in are ten things to avoid — *Shout*, *Fight*, *Snatch*, *Give Up* and
+the like. Those come as **spiky grey stars** rather than round bright bubbles,
+so they're recognisable before the word has been read at all. Hitting one costs
+a point, and the score can go below zero.
+
+Each bad word mirrors a good one — *Snatch* against *Share*, *Give Up* against
+*Keep Going*, *Speak Lies* against *Honest* — so the pairs teach the contrast.
+
+A full run is 100 bubbles: each kind word four times, each bad one twice, in a
 random order. When they're done you get a "well done" card and can go again.
 
 Each pickup gives a coin-style pop, a burst of colour, a floating "+1", a quick
@@ -18,7 +28,7 @@ of trees, bushes, flowers and fencing sliding past. A small speedometer sits in
 the bottom-right corner — it idles at 28 km/h and climbs as you swerve, reading
 the same number that drives the engine note, so needle and sound always agree.
 
-A full run takes roughly four and a half minutes.
+A full run takes roughly two and a half minutes.
 
 ## Running it
 
@@ -53,8 +63,13 @@ finger the car floats, how fast the bubbles fall, how often they appear.
 
 A couple of good first knobs:
 
-- `WORDS` — the twenty words. Change them to whatever you like.
-- `REPEATS_PER_WORD` — 10 by default, so a run is 20 × 10 = 200 bubbles.
+- `WORDS` / `BAD_WORDS` — the word lists. Change them to whatever you like.
+- `REPEATS_PER_WORD` / `BAD_REPEATS_PER_WORD` — 4 and 2, so a run is
+  20 × 4 good + 10 × 2 bad = 100 bubbles. Raise the second one for more dodging.
+- `BAD_PENALTY` — points lost per bad bubble. The score is deliberately allowed
+  to go negative; it turns red when it is.
+- `BAD_HITBOX_FRAC` — bad bubbles collide slightly smaller than they look
+  (0.86), so a near miss counts as a miss. Lower it to be kinder still.
 - `FINGER_OFFSET_Y` — raise it if a thumb still covers the car.
 - `SPAWN_MIN_MS` / `SPAWN_MAX_MS` — lower them for more bubbles.
 - `CAR_FOLLOW_SPEED` — higher is twitchier, lower is floatier.
