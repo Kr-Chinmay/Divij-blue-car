@@ -103,9 +103,23 @@ const CONFIG = {
   // little more willing. Drop it back to 0.25 if it feels twitchy.
   CAR_FOLLOW_SPEED: 0.30,
 
-  // The car is not allowed to drive above this line, so it always stays
-  // in the lower part of the screen. 0.45 = top 45% of screen is off limits.
-  CAR_MIN_Y_FRAC: 0.45,
+  // The car is not allowed to drive above this line. 0.80 = it lives in the
+  // bottom fifth of the screen and the top 80% is off limits.
+  //
+  // This is a reading-time control, not a cosmetic one. Whatever the gear, a
+  // bubble now has to fall most of the way down the screen before it can be
+  // caught, so the word is on screen far longer before the moment of
+  // decision - and an eager driver can't charge up to meet it early. It
+  // roughly doubles the reading time at every gear: the earliest possible
+  // catch in gear 1 moves from 1.5s to 2.8s, and in gear 3 from 0.7s to
+  // 1.3s. Note gear 3 is still tighter than gear 1 used to be - the gears
+  // are meant to cost you something.
+  //
+  // It also quietly fixes the thumb: with the car pinned this low and still
+  // riding FINGER_OFFSET_Y above the touch point, the clamp means the car
+  // parks at this line for any normal finger position. The finger roams
+  // freely below it and never covers the car.
+  CAR_MIN_Y_FRAC: 0.80,
 
   // --- Bubbles ---
   // One radius for every bubble, chosen so the longest phrase ("Keep Going")
@@ -989,10 +1003,18 @@ class CarScene extends Phaser.Scene {
                          CONFIG.SLIDER_TRACK_W - 12, 3, 0xffffff, 0.4).setDepth(10);
     }
 
-    this.add.text(CONFIG.SLIDER_X, this.sliderTop - 22, 'GEAR', {
-      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '14px',
-      color: '#9aa4b8', fontStyle: 'bold'
+    this.add.text(CONFIG.SLIDER_X, this.sliderTop - 48, 'SPEED', {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '15px',
+      color: '#cbd3e1', fontStyle: 'bold'
     }).setOrigin(0.5).setDepth(10);
+
+    // Arrows rather than words for which way is faster - a five-year-old
+    // reads a triangle long before he reads "accelerate". Drawn as shapes
+    // so they can't depend on a font having the glyph.
+    this.add.triangle(CONFIG.SLIDER_X, this.sliderTop - 26,
+                      0, 13, 9, 0, 18, 13, 0x9aa4b8).setDepth(10);
+    this.add.triangle(CONFIG.SLIDER_X, this.sliderBot + 26,
+                      0, 0, 18, 0, 9, 13, 0x9aa4b8).setDepth(10);
 
     this.sliderKnob = this.add.circle(CONFIG.SLIDER_X, this.sliderBot,
                                       CONFIG.SLIDER_KNOB_R, CONFIG.GEAR_COLOURS[0])

@@ -28,17 +28,22 @@ of trees, bushes, flowers and fencing sliding past. A small speedometer sits in
 the bottom-right corner — it idles at 28 km/h and climbs as you swerve, reading
 the same number that drives the engine note, so needle and sound always agree.
 
-A gear selector sits on the left edge with three notches: 1 at the bottom, 2 in
-the middle, 3 at the top. Tap a notch and it stays there — no holding required,
-so a thumb is only needed to *change* speed, never to maintain it. Everything
-speeds up together — road, scenery and bubbles — so a higher gear really does
-mean less time to read each word:
+A speed selector sits on the left edge with three notches, marked with up and
+down arrows: 1 at the bottom, 2 in the middle, 3 at the top. Tap a notch and it
+stays there — no holding required, so a thumb is only needed to *change* speed,
+never to maintain it. Everything speeds up together — road, scenery and bubbles
+— so a higher setting really does mean less time to read each word:
 
-| Gear | Speed | Seconds to read a word |
+| Speed | Multiplier | Seconds before a word can be caught |
 |---|---|---|
-| 1 | 1× | 4.9s |
-| 2 | 1.5× | 3.2s |
-| 3 | 2.1× | 2.3s |
+| 1 | 1× | 2.8s |
+| 2 | 1.5× | 1.8s |
+| 3 | 2.1× | 1.3s |
+
+The car is held to the bottom fifth of the screen, which is what makes those
+numbers what they are. It can't charge up the road to meet a bubble early, so
+every word has to fall most of the way down before it can be collected —
+roughly double the reading time an unrestricted car allowed.
 
 The labels say 1, 2, 3 but the speeds behind them are gentler than that. A
 literal 3× leaves about 1.6 seconds to read a word, notice it's one to dodge
@@ -94,6 +99,9 @@ A couple of good first knobs:
 - `BAD_HITBOX_FRAC` — bad bubbles collide slightly smaller than they look
   (0.86), so a near miss counts as a miss. Lower it to be kinder still.
 - `FINGER_OFFSET_Y` — raise it if a thumb still covers the car.
+- `CAR_MIN_Y_FRAC` — how far up the screen the car may drive. This is the main
+  reading-time control: 0.80 keeps it in the bottom fifth, lower values let an
+  eager driver charge up and catch words sooner.
 - `GAP_MIN_PX` / `GAP_MAX_PX` — road travelled between bubbles. Lower for more
   of them, but never below `BUBBLE_RADIUS × 2` or they start overlapping.
 - `GEAR_SPEEDS` — the speed behind each gear, currently `[1, 1.5, 2.1]`. Add a
