@@ -226,9 +226,19 @@ const CONFIG = {
   CAR_SHADOW_ALPHA: 0.28,
   EXHAUST_MS:       90,   // one puff per this many ms at full throttle
 
-  // --- Throttle slider (left edge) ---
-  // Push the knob up to accelerate, let go and it springs back to cruise,
-  // pull it down to brake.
+  // --- Gear selector (left edge) ---
+  // Three notches rather than a throttle you have to keep holding: gear 1 at
+  // the bottom, 3 at the top. The knob LATCHES where you put it, so a thumb
+  // is only needed to CHANGE speed, never to maintain it - which is the
+  // whole point. Holding a throttle down costs you the very thumb you need
+  // for catching bubbles.
+  //
+  // The labels say 1, 2, 3 but the speeds behind them are gentler than that.
+  // A literal 3x leaves about 1.6 seconds to read a word, spot that it's one
+  // to dodge, and steer around it - past fun and into frustrating at five.
+  GEAR_SPEEDS:  [1, 1.5, 2.1],
+  GEAR_COLOURS: [0x2f6fed, 0x4caf50, 0xff8f3f],   // blue, green, orange
+
   SLIDER_X:        40,
   SLIDER_TOP_FRAC: 0.44,   // where the track starts, as a fraction of height
   SLIDER_BOT_FRAC: 0.90,
@@ -241,9 +251,7 @@ const CONFIG = {
   // left kerb. Without this the slider would fence off part of the road.
   SLIDER_ZONE_W: 78,
 
-  SPEED_MUL_MIN: 0.55,   // hard on the brake
-  SPEED_MUL_MAX: 1.70,   // foot to the floor
-  SPEED_EASE:    0.09,   // how quickly real speed catches up with the knob
+  SPEED_EASE: 0.09,   // how quickly real speed catches up with a gear change
 
   // --- Speedometer (bottom-right) ---
   // Deliberately small and see-through so it sits over the right-hand verge
@@ -252,7 +260,7 @@ const CONFIG = {
   GAUGE_RADIUS:   40,
   GAUGE_SWEEP:    240,   // degrees of needle travel, centred on straight up
   GAUGE_ALPHA:    0.9,
-  GAUGE_CRUISE_KPH: 45,   // what it reads with the throttle at rest
+  GAUGE_CRUISE_KPH: 45,   // what it reads in gear 1
   GAUGE_SWERVE_KPH: 25,   // extra it shows for hard swerving
   GAUGE_MAX_KPH:    120,  // full deflection
 
@@ -974,28 +982,29 @@ class CarScene extends Phaser.Scene {
       .fillRoundedRect(CONFIG.SLIDER_X - halfTrack, this.sliderTop,
                        CONFIG.SLIDER_TRACK_W, trackH, halfTrack);
 
-    // A line across the middle marks where "just cruising" sits, so it's
-    // clear the knob has a resting point rather than a bottom and a top.
-    this.add.rectangle(CONFIG.SLIDER_X, this.sliderMid,
-                       CONFIG.SLIDER_TRACK_W - 10, 3, 0xffffff, 0.45).setDepth(10);
+    // A notch drawn at each gear position, so it reads as three settings to
+    // choose between rather than a continuous slide.
+    for (let g = 1; g <= CONFIG.GEAR_SPEEDS.length; g++) {
+      this.add.rectangle(CONFIG.SLIDER_X, this.gearDetentY(g),
+                         CONFIG.SLIDER_TRACK_W - 12, 3, 0xffffff, 0.4).setDepth(10);
+    }
 
-    this.add.text(CONFIG.SLIDER_X, this.sliderTop - 20, 'FAST', {
+    this.add.text(CONFIG.SLIDER_X, this.sliderTop - 22, 'GEAR', {
       fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '14px',
       color: '#9aa4b8', fontStyle: 'bold'
     }).setOrigin(0.5).setDepth(10);
 
-    this.add.text(CONFIG.SLIDER_X, this.sliderBot + 20, 'SLOW', {
-      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '14px',
-      color: '#9aa4b8', fontStyle: 'bold'
-    }).setOrigin(0.5).setDepth(10);
-
-    this.sliderKnob = this.add.circle(CONFIG.SLIDER_X, this.sliderMid,
-                                      CONFIG.SLIDER_KNOB_R, 0x2f6fed)
+    this.sliderKnob = this.add.circle(CONFIG.SLIDER_X, this.sliderBot,
+                                      CONFIG.SLIDER_KNOB_R, CONFIG.GEAR_COLOURS[0])
       .setStrokeStyle(4, 0xffffff, 0.9)
       .setDepth(11);
 
-    // -1 at the bottom, 0 in the middle, +1 at the top.
-    this.throttle = 0;
+    // The gear number rides on the knob, so what you've selected is legible
+    // without having to work out which notch the knob is sitting at.
+    this.gearLabel = this.add.text(CONFIG.SLIDER_X, this.sliderBot, '1', {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '28px',
+      color: '#ffffff', fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(12);
 
     // Which touch point is working the knob, so steering can ignore it.
     // null rather than undefined so "no finger" is unambiguous.
@@ -1004,27 +1013,24 @@ class CarScene extends Phaser.Scene {
     // A tall invisible pad rather than the knob itself as the target: small
     // fingers grab near the knob, not exactly on it.
     const grabPad = this.add.rectangle(
-      CONFIG.SLIDER_ZONE_W / 2, (this.sliderTop + this.sliderBot) / 2,
+      CONFIG.SLIDER_ZONE_W / 2, this.sliderMid,
       CONFIG.SLIDER_ZONE_W, trackH + 80, 0x000000, 0
     ).setDepth(11).setInteractive();
 
+    // Tapping a notch selects it outright, so any gear is one tap away in
+    // either direction - no cycling up through 3 to get back down to 1.
     grabPad.on('pointerdown', pointer => {
       this.sliderPointerId = pointer.id;
-      this.moveThrottleTo(pointer.y);
+      this.setGear(this.gearFromY(pointer.y));
     });
 
-    // Let go and it springs back to cruise, so the car never runs away with
-    // itself while a finger is busy catching bubbles.
+    // Nothing happens on release. The knob stays where it was put - that is
+    // the whole difference from the throttle this replaces.
     this.input.on('pointerup', pointer => {
-      if (pointer.id === this.sliderPointerId) {
-        this.sliderPointerId = null;
-        this.tweens.add({
-          targets: this.sliderKnob, y: this.sliderMid,
-          duration: 260, ease: 'Back.easeOut',
-          onUpdate: () => { this.throttle = this.throttleFromKnob(); }
-        });
-      }
+      if (pointer.id === this.sliderPointerId) this.sliderPointerId = null;
     });
+
+    this.setGear(1, false);
 
     // --- Speedometer (bottom-right) ---------------------------------
     // Tucked into the corner over the right-hand verge, so it covers scenery
@@ -1149,29 +1155,50 @@ class CarScene extends Phaser.Scene {
      which is what lets every gap be a different length.
      ---------------------------------------------------------------- */
   /* -------------------------------------------------------------------
-     Throttle helpers.
+     Gear helpers.
 
-     The knob's position is the single source of truth: dragging writes to
-     it, the spring-back tween writes to it, and both read the value back
-     out the same way. Keeping one owner avoids the two disagreeing.
+     `this.gear` is the single source of truth - an integer from 1 up. The
+     knob's position is only ever a picture of it, never the other way
+     round, so a half-finished drag can't leave the two disagreeing.
      ---------------------------------------------------------------- */
-  moveThrottleTo(pointerY) {
-    this.sliderKnob.y = Phaser.Math.Clamp(pointerY, this.sliderTop, this.sliderBot);
-    this.throttle = this.throttleFromKnob();
+
+  // Gear 1 sits at the BOTTOM of the track, the top gear at the top.
+  gearDetentY(gear) {
+    const steps = CONFIG.GEAR_SPEEDS.length - 1;
+    return Phaser.Math.Linear(this.sliderBot, this.sliderTop, (gear - 1) / steps);
   }
 
-  throttleFromKnob() {
-    // Screen y grows downward, so the sign is flipped: knob at the top of
-    // the track is +1 (fast), at the bottom is -1 (slow).
-    const half = (this.sliderBot - this.sliderTop) / 2;
-    return Phaser.Math.Clamp((this.sliderMid - this.sliderKnob.y) / half, -1, 1);
+  // Whichever notch the finger landed nearest to.
+  gearFromY(y) {
+    let best = 1, bestDistance = Infinity;
+    for (let g = 1; g <= CONFIG.GEAR_SPEEDS.length; g++) {
+      const d = Math.abs(y - this.gearDetentY(g));
+      if (d < bestDistance) { bestDistance = d; best = g; }
+    }
+    return best;
   }
 
-  // Where the whole world's speed should be heading, given the knob.
+  setGear(gear, animate = true) {
+    this.gear = Phaser.Math.Clamp(gear, 1, CONFIG.GEAR_SPEEDS.length);
+
+    const y = this.gearDetentY(this.gear);
+    this.sliderKnob.setFillStyle(CONFIG.GEAR_COLOURS[this.gear - 1]);
+    this.gearLabel.setText(String(this.gear));
+
+    // Kill any in-flight slide first, or dabbing quickly between gears
+    // leaves two tweens fighting over the knob.
+    this.tweens.killTweensOf(this.sliderKnob);
+
+    if (animate) {
+      this.tweens.add({ targets: this.sliderKnob, y, duration: 170, ease: 'Back.easeOut' });
+    } else {
+      this.sliderKnob.y = y;
+    }
+  }
+
+  // Where the whole world's speed should be heading, given the gear.
   targetSpeedMultiplier() {
-    return this.throttle >= 0
-      ? 1 + this.throttle * (CONFIG.SPEED_MUL_MAX - 1)
-      : 1 + this.throttle * (1 - CONFIG.SPEED_MUL_MIN);
+    return CONFIG.GEAR_SPEEDS[this.gear - 1];
   }
 
 
@@ -1620,6 +1647,10 @@ class CarScene extends Phaser.Scene {
     this.buildDeck();
     this.distanceSinceSpawn = 0;
     this.nextGapPx = Phaser.Math.Between(CONFIG.GAP_MIN_PX, CONFIG.GAP_MAX_PX);
+
+    // Back to gear 1, so a new run always starts at a speed he chose to
+    // leave rather than one left over from the last go.
+    this.setGear(1);
   }
 
 
@@ -1632,22 +1663,24 @@ class CarScene extends Phaser.Scene {
 
     const W = this.scale.width;
 
-    // --- 0. Throttle ------------------------------------------------
-    // While a finger is on the knob, follow it. The spring-back tween
-    // handles the value once the finger lets go.
+    // --- 0. Gear ----------------------------------------------------
+    // A finger already down on the selector can slide between notches, so
+    // it works either as three buttons or as a little gear lever.
     if (this.sliderPointerId !== null) {
       const held = this.input.manager.pointers.find(p => p && p.id === this.sliderPointerId);
-      if (held && held.isDown) this.moveThrottleTo(held.y);
+      if (held && held.isDown) {
+        const g = this.gearFromY(held.y);
+        if (g !== this.gear) this.setGear(g);
+      }
     }
 
-    // Ease towards the knob's speed instead of snapping to it, so stamping
-    // on the brake slows the world down rather than jolting it.
+    // Ease towards the gear's speed instead of snapping to it, so changing
+    // gear pulls away smoothly rather than jolting the whole screen.
     this.speedMul = Phaser.Math.Linear(
       this.speedMul, this.targetSpeedMultiplier(), CONFIG.SPEED_EASE);
 
-    // Tint the knob by what it's doing: green pushing on, red hauling back.
-    this.sliderKnob.setFillStyle(
-      this.throttle > 0.08 ? 0x4caf50 : this.throttle < -0.08 ? 0xe8544a : 0x2f6fed);
+    // The number rides along with the knob while it slides between notches.
+    this.gearLabel.y = this.sliderKnob.y;
 
     const halfW = CONFIG.CAR_WIDTH  / 2;
     const halfH = CONFIG.CAR_HEIGHT / 2;
@@ -1698,19 +1731,18 @@ class CarScene extends Phaser.Scene {
       0.12
     );
 
-    // The engine answers to the throttle first and to swerving second - it
-    // should roar because you opened it up, not only because you jinked.
-    const throttleNorm = (this.speedMul - CONFIG.SPEED_MUL_MIN)
-                       / (CONFIG.SPEED_MUL_MAX - CONFIG.SPEED_MUL_MIN);
+    // The engine answers to the gear first and to swerving second - it
+    // should roar because you changed up, not only because you jinked.
+    const topGear = CONFIG.GEAR_SPEEDS[CONFIG.GEAR_SPEEDS.length - 1];
+    const throttleNorm = (this.speedMul - 1) / (topGear - 1);
     this.engineLoad = Phaser.Math.Clamp(
       throttleNorm * 0.8 + this.swerveLoad * 0.4, 0, 1);
 
     this.sfx.setEngineLoad(this.engineLoad);
 
     // --- 2bb. Speedometer -------------------------------------------
-    // The needle reads the world's actual speed, so it answers to the
-    // throttle rather than only to swerving - braking visibly winds it back.
-    // Swerving still adds a little on top.
+    // The needle reads the world's actual speed, so changing gear visibly
+    // moves it. Swerving still adds a little on top.
     const kph = CONFIG.GAUGE_CRUISE_KPH * this.speedMul
               + this.swerveLoad * CONFIG.GAUGE_SWERVE_KPH;
 

@@ -28,17 +28,30 @@ of trees, bushes, flowers and fencing sliding past. A small speedometer sits in
 the bottom-right corner — it idles at 28 km/h and climbs as you swerve, reading
 the same number that drives the engine note, so needle and sound always agree.
 
-A throttle slider sits on the left edge: push the knob up to accelerate, pull
-it down to brake, let go and it springs back to cruising. Everything speeds up
-together — road, scenery and bubbles — so going fast really does mean less time
-to read each word.
+A gear selector sits on the left edge with three notches: 1 at the bottom, 2 in
+the middle, 3 at the top. Tap a notch and it stays there — no holding required,
+so a thumb is only needed to *change* speed, never to maintain it. Everything
+speeds up together — road, scenery and bubbles — so a higher gear really does
+mean less time to read each word:
 
-Because the slider occupies the left edge, steering maps the rest of the width
-onto the full road: touching just beside the slider puts the car on the left
-kerb, the right edge puts it on the right. One thumb can still reach the whole
-road while the other works the throttle.
+| Gear | Speed | Seconds to read a word |
+|---|---|---|
+| 1 | 1× | 4.9s |
+| 2 | 1.5× | 3.2s |
+| 3 | 2.1× | 2.3s |
 
-A full run takes roughly two and a half minutes at cruising speed.
+The labels say 1, 2, 3 but the speeds behind them are gentler than that. A
+literal 3× leaves about 1.6 seconds to read a word, notice it's one to dodge
+and steer around it — past fun and into frustrating at five. Every run starts
+in gear 1.
+
+Because the selector occupies the left edge, steering maps the rest of the
+width onto the full road: touching just beside it puts the car on the left
+kerb, the right edge puts it on the right. One thumb can reach the whole road
+while the other changes gear.
+
+A full run takes roughly two and a half minutes in gear 1, or about seventy
+seconds in gear 3.
 
 ## Running it
 
@@ -83,8 +96,8 @@ A couple of good first knobs:
 - `FINGER_OFFSET_Y` — raise it if a thumb still covers the car.
 - `GAP_MIN_PX` / `GAP_MAX_PX` — road travelled between bubbles. Lower for more
   of them, but never below `BUBBLE_RADIUS × 2` or they start overlapping.
-- `SPEED_MUL_MIN` / `SPEED_MUL_MAX` — how much the brake and throttle change
-  the pace. Currently 0.55× and 1.7×.
+- `GEAR_SPEEDS` — the speed behind each gear, currently `[1, 1.5, 2.1]`. Add a
+  fourth number and a fourth notch appears on the selector automatically.
 - `CAR_FOLLOW_SPEED` — higher is twitchier, lower is floatier.
 - `HUM_VOLUME` / `ENGINE_VOLUME` — set either to `0` to drop that sound.
 - `ENGINE_BASE_HZ` — the engine's idle pitch; lower sounds like a bigger car,
