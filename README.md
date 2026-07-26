@@ -28,7 +28,17 @@ of trees, bushes, flowers and fencing sliding past. A small speedometer sits in
 the bottom-right corner — it idles at 28 km/h and climbs as you swerve, reading
 the same number that drives the engine note, so needle and sound always agree.
 
-A full run takes roughly two and a half minutes.
+A throttle slider sits on the left edge: push the knob up to accelerate, pull
+it down to brake, let go and it springs back to cruising. Everything speeds up
+together — road, scenery and bubbles — so going fast really does mean less time
+to read each word.
+
+Because the slider occupies the left edge, steering maps the rest of the width
+onto the full road: touching just beside the slider puts the car on the left
+kerb, the right edge puts it on the right. One thumb can still reach the whole
+road while the other works the throttle.
+
+A full run takes roughly two and a half minutes at cruising speed.
 
 ## Running it
 
@@ -71,7 +81,10 @@ A couple of good first knobs:
 - `BAD_HITBOX_FRAC` — bad bubbles collide slightly smaller than they look
   (0.86), so a near miss counts as a miss. Lower it to be kinder still.
 - `FINGER_OFFSET_Y` — raise it if a thumb still covers the car.
-- `SPAWN_MIN_MS` / `SPAWN_MAX_MS` — lower them for more bubbles.
+- `GAP_MIN_PX` / `GAP_MAX_PX` — road travelled between bubbles. Lower for more
+  of them, but never below `BUBBLE_RADIUS × 2` or they start overlapping.
+- `SPEED_MUL_MIN` / `SPEED_MUL_MAX` — how much the brake and throttle change
+  the pace. Currently 0.55× and 1.7×.
 - `CAR_FOLLOW_SPEED` — higher is twitchier, lower is floatier.
 - `HUM_VOLUME` / `ENGINE_VOLUME` — set either to `0` to drop that sound.
 - `ENGINE_BASE_HZ` — the engine's idle pitch; lower sounds like a bigger car,
@@ -82,25 +95,27 @@ A couple of good first knobs:
 
 ### Changing the overall pace
 
-Speed lives in three values that have to move together: `SCROLL_SPEED` (how
-fast the road slides past), `BUBBLE_SPEED` (how fast bubbles fall), and the
-`SPAWN_MIN_MS` / `SPAWN_MAX_MS` pause between them.
+`SCROLL_SPEED` and `BUBBLE_SPEED` set the cruising pace. Multiply both by the
+same number to make the whole game faster or slower.
 
-To make the game *n* times faster, multiply the two speeds by *n* and **divide**
-both pauses by *n*. That keeps the same three-or-four bubbles on screen and the
-same spacing between them — only the pace changes.
-
-The reason the pauses matter: every bubble deliberately falls at the same
-speed, so the pause between spawns is also the gap between bubbles on screen.
-Shorten the pause without slowing the fall and bubbles start overlapping and
-covering each other's words. The rule to keep is:
+Spacing looks after itself. Bubbles are spawned once enough **road has gone
+by** — `GAP_MIN_PX` to `GAP_MAX_PX` — rather than after a set number of
+milliseconds. Since the only rule that matters is "keep more than a bubble's
+width between them", measuring the gap in the same units as the bubble is
+what makes it correct. All you have to keep is:
 
 ```
-SPAWN_MIN_MS × BUBBLE_SPEED / 1000  >  BUBBLE_RADIUS × 2
+GAP_MIN_PX  >  BUBBLE_RADIUS × 2
 ```
 
-At the current settings that's `1133 × 218 / 1000 = 247px` against a 168px
-bubble, so there's 79px of clearance no matter how the timing falls.
+Currently 250 against 168, so 82px of clearance.
+
+This is why the throttle can't break anything. A timer only guarantees spacing
+while the speed is constant — brake halfway through a pause and the bubble
+ahead covers less ground than the timer assumed, and the next one lands on top
+of it. Counting distance is correct at any speed, including while the speed is
+changing. Simulated with the throttle slammed between full brake and full
+throttle for 40 seconds, the closest two bubbles came was 266px.
 
 Set `debug: true` in the `physics.arcade` block to see the collision boxes.
 `window.game` is exposed too, so `game.scene.keys.CarScene` reaches the live

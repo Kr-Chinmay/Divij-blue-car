@@ -116,22 +116,21 @@ const CONFIG = {
   // small - each word gets a moment to be read.
   MAX_ACTIVE_BUBBLES: 4,
 
-  // Gap between spawns, picked at random inside this range so the rhythm
-  // never settles into a pattern.
+  // Gap between bubbles, measured in PIXELS TRAVELLED rather than in
+  // milliseconds waited.
   //
-  // The minimum matters more than it looks: every bubble falls at the SAME
-  // speed, so the gap in time is also the gap in space. At 218 px/s a
-  // 1133ms pause puts 247px between two bubbles - comfortably more than a
-  // bubble's 168px width, so two words can never drift over each other and
-  // become unreadable. (Random speeds were the bug here: a fast bubble
-  // would catch up with a slow one and sit on top of it.)
+  // This is the whole reason two words can never drift over each other. A
+  // timer only guarantees spacing while the speed is constant: brake halfway
+  // through a pause and the bubble ahead covers less ground than the timer
+  // assumed, and the next one lands on top of it. Counting distance instead
+  // makes the gap correct at any speed, and while braking or accelerating,
+  // by construction rather than by arithmetic.
   //
-  // These came down by the same 1.5x the speeds went up, which is why the
-  // spacing is unchanged and three or four are still on screen at a time.
-  SPAWN_MIN_MS: 1133,
-  SPAWN_MAX_MS: 1600,
+  // The minimum simply has to clear a bubble's 168px width.
+  GAP_MIN_PX: 250,
+  GAP_MAX_PX: 360,
 
-  BUBBLE_SPEED: 218,   // downward drift, pixels per second
+  BUBBLE_SPEED: 218,   // downward drift at cruise, pixels per second
 
   // The 20 kind words - the ones to CATCH.
   WORDS: [
@@ -227,6 +226,25 @@ const CONFIG = {
   CAR_SHADOW_ALPHA: 0.28,
   EXHAUST_MS:       90,   // one puff per this many ms at full throttle
 
+  // --- Throttle slider (left edge) ---
+  // Push the knob up to accelerate, let go and it springs back to cruise,
+  // pull it down to brake.
+  SLIDER_X:        40,
+  SLIDER_TOP_FRAC: 0.44,   // where the track starts, as a fraction of height
+  SLIDER_BOT_FRAC: 0.90,
+  SLIDER_TRACK_W:  32,
+  SLIDER_KNOB_R:   26,
+
+  // Touches left of this line belong to the slider, never to steering.
+  // Steering then maps the REMAINING width onto the full road: a thumb that
+  // can only reach the right of the screen can still park the car on the
+  // left kerb. Without this the slider would fence off part of the road.
+  SLIDER_ZONE_W: 78,
+
+  SPEED_MUL_MIN: 0.55,   // hard on the brake
+  SPEED_MUL_MAX: 1.70,   // foot to the floor
+  SPEED_EASE:    0.09,   // how quickly real speed catches up with the knob
+
   // --- Speedometer (bottom-right) ---
   // Deliberately small and see-through so it sits over the right-hand verge
   // rather than the road. The needle reads the same number that drives the
@@ -234,8 +252,9 @@ const CONFIG = {
   GAUGE_RADIUS:   40,
   GAUGE_SWEEP:    240,   // degrees of needle travel, centred on straight up
   GAUGE_ALPHA:    0.9,
-  GAUGE_IDLE_KPH: 28,    // what it reads when you're not moving your finger
-  GAUGE_MAX_KPH:  120,   // full deflection
+  GAUGE_CRUISE_KPH: 45,   // what it reads with the throttle at rest
+  GAUGE_SWERVE_KPH: 25,   // extra it shows for hard swerving
+  GAUGE_MAX_KPH:    120,  // full deflection
 
   // --- Score display ---
   SCORE_COLOR:     '#ffd23f',   // normal
@@ -853,7 +872,11 @@ class CarScene extends Phaser.Scene {
     this.colourIndex  = Phaser.Math.Between(0, CONFIG.BUBBLE_COLOURS.length - 1);
     this.lastBubbleX  = W / 2;
     this.buildDeck();
-    this.scheduleNextBubble();
+
+    // Spawning is driven by distance travelled, not by a timer - see the
+    // note by GAP_MIN_PX. These two track progress towards the next one.
+    this.distanceSinceSpawn = 0;
+    this.nextGapPx = Phaser.Math.Between(CONFIG.GAP_MIN_PX, CONFIG.GAP_MAX_PX);
 
     // --- Score display (top-left corner) ----------------------------
     this.scoreText = this.add.text(20, 14, 'Score: 0', {
@@ -914,17 +937,94 @@ class CarScene extends Phaser.Scene {
       Phaser.Geom.Rectangle.Contains
     );
 
-    this.muteBtn.on('pointerdown', () => {
+    this.muteBtn.on('pointerdown', pointer => {
       this.sfx.setMuted(!this.sfx.muted);
       this.muteBtn.setText(this.sfx.muted ? '🔇' : '🔊');
 
       // Remember that this particular touch belongs to the button, so the
       // car doesn't go lurching up to the corner while we tap it.
       this.buttonGesture = true;
+      this.buttonPointerId = pointer.id;
     });
 
     this.buttonGesture = false;
-    this.input.on('pointerup', () => { this.buttonGesture = false; });
+    this.buttonPointerId = null;
+    this.input.on('pointerup', pointer => {
+      if (pointer.id === this.buttonPointerId) {
+        this.buttonGesture = false;
+        this.buttonPointerId = null;
+      }
+    });
+
+    // --- Throttle slider (left edge) --------------------------------
+    // Two fingers have to work at once here - one on the knob, one steering -
+    // so Phaser needs to track more than its default single touch point.
+    this.input.addPointer(2);
+
+    this.sliderTop = H * CONFIG.SLIDER_TOP_FRAC;
+    this.sliderBot = H * CONFIG.SLIDER_BOT_FRAC;
+    this.sliderMid = (this.sliderTop + this.sliderBot) / 2;
+
+    const trackH = this.sliderBot - this.sliderTop;
+    const halfTrack = CONFIG.SLIDER_TRACK_W / 2;
+
+    this.add.graphics()
+      .setDepth(9)
+      .fillStyle(0x101828, 0.5)
+      .fillRoundedRect(CONFIG.SLIDER_X - halfTrack, this.sliderTop,
+                       CONFIG.SLIDER_TRACK_W, trackH, halfTrack);
+
+    // A line across the middle marks where "just cruising" sits, so it's
+    // clear the knob has a resting point rather than a bottom and a top.
+    this.add.rectangle(CONFIG.SLIDER_X, this.sliderMid,
+                       CONFIG.SLIDER_TRACK_W - 10, 3, 0xffffff, 0.45).setDepth(10);
+
+    this.add.text(CONFIG.SLIDER_X, this.sliderTop - 20, 'FAST', {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '14px',
+      color: '#9aa4b8', fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(10);
+
+    this.add.text(CONFIG.SLIDER_X, this.sliderBot + 20, 'SLOW', {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '14px',
+      color: '#9aa4b8', fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(10);
+
+    this.sliderKnob = this.add.circle(CONFIG.SLIDER_X, this.sliderMid,
+                                      CONFIG.SLIDER_KNOB_R, 0x2f6fed)
+      .setStrokeStyle(4, 0xffffff, 0.9)
+      .setDepth(11);
+
+    // -1 at the bottom, 0 in the middle, +1 at the top.
+    this.throttle = 0;
+
+    // Which touch point is working the knob, so steering can ignore it.
+    // null rather than undefined so "no finger" is unambiguous.
+    this.sliderPointerId = null;
+
+    // A tall invisible pad rather than the knob itself as the target: small
+    // fingers grab near the knob, not exactly on it.
+    const grabPad = this.add.rectangle(
+      CONFIG.SLIDER_ZONE_W / 2, (this.sliderTop + this.sliderBot) / 2,
+      CONFIG.SLIDER_ZONE_W, trackH + 80, 0x000000, 0
+    ).setDepth(11).setInteractive();
+
+    grabPad.on('pointerdown', pointer => {
+      this.sliderPointerId = pointer.id;
+      this.moveThrottleTo(pointer.y);
+    });
+
+    // Let go and it springs back to cruise, so the car never runs away with
+    // itself while a finger is busy catching bubbles.
+    this.input.on('pointerup', pointer => {
+      if (pointer.id === this.sliderPointerId) {
+        this.sliderPointerId = null;
+        this.tweens.add({
+          targets: this.sliderKnob, y: this.sliderMid,
+          duration: 260, ease: 'Back.easeOut',
+          onUpdate: () => { this.throttle = this.throttleFromKnob(); }
+        });
+      }
+    });
 
     // --- Speedometer (bottom-right) ---------------------------------
     // Tucked into the corner over the right-hand verge, so it covers scenery
@@ -967,6 +1067,11 @@ class CarScene extends Phaser.Scene {
 
     // How hard the engine is working, smoothed between frames (see update()).
     this.engineLoad = 0;
+    this.swerveLoad = 0;
+
+    // How fast the world is running compared with cruise. Starts at 1 so
+    // nothing lurches on the first frame before the slider is touched.
+    this.speedMul = 1;
 
     // --- One-time "how to play" hint --------------------------------
     this.hint = this.add.text(W / 2, H * 0.30, 'Drag to drive!', {
@@ -1043,17 +1148,53 @@ class CarScene extends Phaser.Scene {
      This re-schedules itself rather than using one fixed repeating timer,
      which is what lets every gap be a different length.
      ---------------------------------------------------------------- */
-  scheduleNextBubble() {
-    if (this.deck.length === 0) return;   // that's all 200 of them
+  /* -------------------------------------------------------------------
+     Throttle helpers.
 
-    const delay = Phaser.Math.Between(CONFIG.SPAWN_MIN_MS, CONFIG.SPAWN_MAX_MS);
+     The knob's position is the single source of truth: dragging writes to
+     it, the spring-back tween writes to it, and both read the value back
+     out the same way. Keeping one owner avoids the two disagreeing.
+     ---------------------------------------------------------------- */
+  moveThrottleTo(pointerY) {
+    this.sliderKnob.y = Phaser.Math.Clamp(pointerY, this.sliderTop, this.sliderBot);
+    this.throttle = this.throttleFromKnob();
+  }
 
-    this.spawnTimer = this.time.delayedCall(delay, () => {
-      // If the screen is already full, skip this turn and try again after
-      // the next pause. Nothing is lost - the word stays in the deck.
-      if (this.bubbles.getLength() < CONFIG.MAX_ACTIVE_BUBBLES) this.spawnBubble();
-      this.scheduleNextBubble();
-    });
+  throttleFromKnob() {
+    // Screen y grows downward, so the sign is flipped: knob at the top of
+    // the track is +1 (fast), at the bottom is -1 (slow).
+    const half = (this.sliderBot - this.sliderTop) / 2;
+    return Phaser.Math.Clamp((this.sliderMid - this.sliderKnob.y) / half, -1, 1);
+  }
+
+  // Where the whole world's speed should be heading, given the knob.
+  targetSpeedMultiplier() {
+    return this.throttle >= 0
+      ? 1 + this.throttle * (CONFIG.SPEED_MUL_MAX - 1)
+      : 1 + this.throttle * (1 - CONFIG.SPEED_MUL_MIN);
+  }
+
+
+  /* -------------------------------------------------------------------
+     Find the touch point that should be steering.
+
+     Anything working the slider is skipped, as is anything inside the
+     slider's zone - otherwise grabbing the knob would also fling the car
+     across to the left kerb.
+     ---------------------------------------------------------------- */
+  steeringPointer() {
+    const onTouch = this.sys.game.device.input.touch;
+
+    for (const p of this.input.manager.pointers) {
+      if (!p) continue;
+      if (this.sliderPointerId !== null && p.id === this.sliderPointerId) continue;
+      if (this.buttonGesture && p.id === this.buttonPointerId) continue;
+      if (p.x <= CONFIG.SLIDER_ZONE_W) continue;
+
+      // A mouse has nothing to hold down, so it steers whenever it moves.
+      if (p.isDown || (!onTouch && p.id === 0)) return p;
+    }
+    return null;
   }
 
 
@@ -1186,10 +1327,11 @@ class CarScene extends Phaser.Scene {
     bubble.body.setCircle(bodyR, -bodyR, -bodyR);
     bubble.body.setAllowGravity(false);
 
-    // One shared speed for every bubble - see the note by SPAWN_MIN_MS.
-    // Identical speeds mean the spacing they spawn with is the spacing they
-    // keep, all the way down the screen.
-    bubble.body.setVelocityY(CONFIG.BUBBLE_SPEED);
+    // One shared speed for every bubble - see the note by GAP_MIN_PX. The
+    // update loop re-applies it every frame as the throttle moves, so they
+    // always fall in lockstep and the spacing they spawn with is the
+    // spacing they keep, all the way down the screen.
+    bubble.body.setVelocityY(CONFIG.BUBBLE_SPEED * this.speedMul);
   }
 
 
@@ -1334,7 +1476,7 @@ class CarScene extends Phaser.Scene {
 
     this.tweens.add({
       targets: p,
-      y: p.y + CONFIG.SCROLL_SPEED * (life / 1000),
+      y: p.y + CONFIG.SCROLL_SPEED * this.speedMul * (life / 1000),
       scale: 2.2,
       alpha: 0,
       duration: life,
@@ -1476,7 +1618,8 @@ class CarScene extends Phaser.Scene {
     this.finished = false;
 
     this.buildDeck();
-    this.scheduleNextBubble();
+    this.distanceSinceSpawn = 0;
+    this.nextGapPx = Phaser.Math.Between(CONFIG.GAP_MIN_PX, CONFIG.GAP_MAX_PX);
   }
 
 
@@ -1487,19 +1630,40 @@ class CarScene extends Phaser.Scene {
   update(time, delta) {
     const H = this.scale.height;
 
+    const W = this.scale.width;
+
+    // --- 0. Throttle ------------------------------------------------
+    // While a finger is on the knob, follow it. The spring-back tween
+    // handles the value once the finger lets go.
+    if (this.sliderPointerId !== null) {
+      const held = this.input.manager.pointers.find(p => p && p.id === this.sliderPointerId);
+      if (held && held.isDown) this.moveThrottleTo(held.y);
+    }
+
+    // Ease towards the knob's speed instead of snapping to it, so stamping
+    // on the brake slows the world down rather than jolting it.
+    this.speedMul = Phaser.Math.Linear(
+      this.speedMul, this.targetSpeedMultiplier(), CONFIG.SPEED_EASE);
+
+    // Tint the knob by what it's doing: green pushing on, red hauling back.
+    this.sliderKnob.setFillStyle(
+      this.throttle > 0.08 ? 0x4caf50 : this.throttle < -0.08 ? 0xe8544a : 0x2f6fed);
+
+    const halfW = CONFIG.CAR_WIDTH  / 2;
+    const halfH = CONFIG.CAR_HEIGHT / 2;
+    const carMinX = this.roadLeft  + halfW;
+    const carMaxX = this.roadRight - halfW;
+
     // --- 1. Work out where the car should be ------------------------
-    const pointer = this.input.activePointer;
+    const pointer = this.steeringPointer();
 
-    // On a touch screen we only steer while a finger is actually down.
-    // On a desktop mouse there's nothing to hold down, so we follow the
-    // cursor whenever it moves.
-    const isTouchDevice = this.sys.game.device.input.touch;
-    const steering = this.pointerReady
-                  && !this.buttonGesture              // this touch is on the mute button
-                  && (pointer.isDown || !isTouchDevice);
-
-    if (steering) {
-      this.targetX = pointer.x;
+    if (pointer && this.pointerReady) {
+      // Map the touchable width (everything right of the slider) onto the
+      // full width of the road. A thumb that can only reach the right of
+      // the screen can still put the car on the left kerb.
+      const across = Phaser.Math.Clamp(
+        (pointer.x - CONFIG.SLIDER_ZONE_W) / (W - CONFIG.SLIDER_ZONE_W), 0, 1);
+      this.targetX = Phaser.Math.Linear(carMinX, carMaxX, across);
 
       // THE KEY BIT: sit FINGER_OFFSET_Y pixels above the touch point,
       // so a fingertip never sits on top of the car.
@@ -1507,9 +1671,7 @@ class CarScene extends Phaser.Scene {
     }
 
     // Keep the car on the tar, and never let it climb too high.
-    const halfW = CONFIG.CAR_WIDTH  / 2;
-    const halfH = CONFIG.CAR_HEIGHT / 2;
-    this.targetX = Phaser.Math.Clamp(this.targetX, this.roadLeft + halfW, this.roadRight - halfW);
+    this.targetX = Phaser.Math.Clamp(this.targetX, carMinX, carMaxX);
     this.targetY = Phaser.Math.Clamp(this.targetY, H * CONFIG.CAR_MIN_Y_FRAC, H - halfH);
 
     // --- 2. Glide towards that target -------------------------------
@@ -1530,23 +1692,32 @@ class CarScene extends Phaser.Scene {
 
     // Smooth towards the new value rather than jumping to it, or the engine
     // note flutters on every little frame-to-frame wobble.
-    this.engineLoad = Phaser.Math.Linear(
-      this.engineLoad,
+    this.swerveLoad = Phaser.Math.Linear(
+      this.swerveLoad,
       Phaser.Math.Clamp(pxPerSec / CONFIG.ENGINE_MAX_PXPS, 0, 1),
       0.12
     );
+
+    // The engine answers to the throttle first and to swerving second - it
+    // should roar because you opened it up, not only because you jinked.
+    const throttleNorm = (this.speedMul - CONFIG.SPEED_MUL_MIN)
+                       / (CONFIG.SPEED_MUL_MAX - CONFIG.SPEED_MUL_MIN);
+    this.engineLoad = Phaser.Math.Clamp(
+      throttleNorm * 0.8 + this.swerveLoad * 0.4, 0, 1);
+
     this.sfx.setEngineLoad(this.engineLoad);
 
     // --- 2bb. Speedometer -------------------------------------------
-    // You're always cruising, so the gauge idles at GAUGE_IDLE_KPH and
-    // climbs from there with how hard you're driving - the same smoothed
-    // number the engine note uses, so needle and sound move together.
-    const kph = CONFIG.GAUGE_IDLE_KPH
-              + this.engineLoad * (CONFIG.GAUGE_MAX_KPH - CONFIG.GAUGE_IDLE_KPH);
+    // The needle reads the world's actual speed, so it answers to the
+    // throttle rather than only to swerving - braking visibly winds it back.
+    // Swerving still adds a little on top.
+    const kph = CONFIG.GAUGE_CRUISE_KPH * this.speedMul
+              + this.swerveLoad * CONFIG.GAUGE_SWERVE_KPH;
 
     // Where that speed sits on the dial, as 0..1 of full scale, then mapped
-    // onto the needle's sweep either side of straight up.
-    const fullScale = kph / CONFIG.GAUGE_MAX_KPH;
+    // onto the needle's sweep either side of straight up. Clamped so a
+    // retuned speed range can never swing the needle off the dial.
+    const fullScale = Phaser.Math.Clamp(kph / CONFIG.GAUGE_MAX_KPH, 0, 1);
     this.gaugeNeedle.rotation = Phaser.Math.DegToRad(
       -CONFIG.GAUGE_SWEEP / 2 + fullScale * CONFIG.GAUGE_SWEEP
     );
@@ -1568,7 +1739,7 @@ class CarScene extends Phaser.Scene {
     }
 
     // --- 3. Scroll the scenery to fake forward motion ---------------
-    const scroll = CONFIG.SCROLL_SPEED * (delta / 1000);   // pixels this frame
+    const scroll = CONFIG.SCROLL_SPEED * this.speedMul * (delta / 1000);
 
     this.laneDashes.forEach(dash => {
       dash.y += scroll;
@@ -1583,6 +1754,29 @@ class CarScene extends Phaser.Scene {
         this.placeProp(prop, -60 - Phaser.Math.Between(0, CONFIG.PROP_GAP_MAX));
       }
     });
+
+    // --- 3a. Bubbles fall at the world's current speed ---------------
+    // Every bubble is set to the SAME speed every frame. That's what keeps
+    // the gaps between them fixed while you brake and accelerate: they all
+    // change together, so nothing can close on the one ahead.
+    const bubbleSpeed = CONFIG.BUBBLE_SPEED * this.speedMul;
+    this.bubbles.getChildren().forEach(b => {
+      if (b.body && b.body.enable) b.body.setVelocityY(bubbleSpeed);
+    });
+
+    // Spawn once enough ROAD has gone by, rather than once enough time has.
+    // Distance is the thing the spacing actually depends on, so measuring it
+    // directly keeps bubbles apart at any speed.
+    if (this.deck.length > 0) {
+      this.distanceSinceSpawn += bubbleSpeed * (delta / 1000);
+
+      if (this.distanceSinceSpawn >= this.nextGapPx
+          && this.bubbles.getLength() < CONFIG.MAX_ACTIVE_BUBBLES) {
+        this.spawnBubble();
+        this.distanceSinceSpawn = 0;
+        this.nextGapPx = Phaser.Math.Between(CONFIG.GAP_MIN_PX, CONFIG.GAP_MAX_PX);
+      }
+    }
 
     // --- 3b. Let the bubbles float ----------------------------------
     // This drifts the artwork INSIDE each bubble, never the bubble itself,
