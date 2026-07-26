@@ -74,7 +74,10 @@ A couple of good first knobs:
 - `SPAWN_MIN_MS` / `SPAWN_MAX_MS` — lower them for more bubbles.
 - `CAR_FOLLOW_SPEED` — higher is twitchier, lower is floatier.
 - `HUM_VOLUME` / `ENGINE_VOLUME` — set either to `0` to drop that sound.
-- `ENGINE_BASE_HZ` — the engine's idle pitch; lower sounds like a bigger car.
+- `ENGINE_BASE_HZ` — the engine's idle pitch; lower sounds like a bigger car,
+  but don't go far below 75 or phone speakers stop reproducing it at all.
+- `ENGINE_GRIT` — how rough the engine sounds. This is the main "character"
+  knob; drop it towards 0 and you're left with a smooth synth drone.
 - `SCORE_BOUNCE_SCALE` / `CAR_BOUNCE_SCALE` — how big the pickup bounces get.
 
 ### Changing the overall pace

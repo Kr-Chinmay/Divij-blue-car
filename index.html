@@ -253,10 +253,24 @@ const CONFIG = {
 
   // The engine. Its pitch and volume follow how fast you're dragging the
   // car, so it idles when you're still and revs when you swerve.
-  ENGINE_VOLUME:   0.05,  // set to 0 to switch the engine off entirely
-  ENGINE_BASE_HZ:  62,    // pitch when idling
-  ENGINE_REV_HZ:   46,    // how much higher it climbs at full tilt
+  //
+  // A note on the pitch: phone speakers reproduce almost nothing below about
+  // 300Hz, so a "realistic" 60Hz engine simply vanishes on a handset. What
+  // you actually hear is its harmonics, which is why this builds the sound
+  // from several layers rather than one low tone.
+  ENGINE_VOLUME:   0.09,  // set to 0 to switch the engine off entirely
+  ENGINE_BASE_HZ:  75,    // pitch when idling
+  ENGINE_REV_HZ:   65,    // how much higher it climbs at full tilt
   ENGINE_MAX_PXPS: 600,   // car speed (px/sec) that counts as full throttle
+
+  // How much combustion "grit" (filtered noise) sits on top of the tone.
+  // This is most of what stops it sounding like a synthesiser drone.
+  ENGINE_GRIT: 0.34,
+
+  // The chug rate rises with the revs, exactly as a real engine's firing
+  // rate does. Holding it fixed is what made the old one sound lifeless.
+  ENGINE_CHUG_MIN_HZ: 6,
+  ENGINE_CHUG_MAX_HZ: 23,
 };
 
 
@@ -284,13 +298,42 @@ class SoundKit {
     // single change rather than chasing down each sound individually.
     this.master = this.ctx.createGain();
     this.master.gain.value = CONFIG.MASTER_VOLUME;
-    this.master.connect(this.ctx.destination);
+
+    // A gentle limiter on the way out. The engine alone is three layers
+    // through a resonant filter, and with a pop landing on top the total can
+    // momentarily push past full scale - where Web Audio clips hard and you
+    // hear crackle. This rounds those peaks off instead.
+    const limiter = this.ctx.createDynamicsCompressor();
+    limiter.threshold.value = -6;
+    limiter.knee.value = 6;
+    limiter.ratio.value = 12;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.15;
+
+    this.master.connect(limiter);
+    limiter.connect(this.ctx.destination);
   }
 
   // Browsers refuse to make noise until the user has interacted with the
   // page. Calling this from a tap handler wakes the audio up.
   resume() {
     if (this.enabled && this.ctx.state === 'suspended') this.ctx.resume();
+  }
+
+  /* Two seconds of random samples on a loop - the raw material for both the
+     road hum and the engine's combustion grit. Far smaller than any audio
+     file, and once filtered it never repeats audibly. */
+  makeNoiseSource() {
+    const ctx = this.ctx;
+    const frames = ctx.sampleRate * 2;
+    const buffer = ctx.createBuffer(1, frames, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < frames; i++) data[i] = Math.random() * 2 - 1;
+
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    return src;
   }
 
   /* The happy coin "pop": two quick notes, the second higher than the
@@ -372,17 +415,7 @@ class SoundKit {
     this.humStarted = true;
 
     const ctx = this.ctx;
-
-    // Two seconds of random samples, looped forever. Far smaller than any
-    // audio file would be, and it never repeats audibly once filtered.
-    const frames = ctx.sampleRate * 2;
-    const buffer = ctx.createBuffer(1, frames, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < frames; i++) data[i] = Math.random() * 2 - 1;
-
-    const src = ctx.createBufferSource();
-    src.buffer = buffer;
-    src.loop = true;
+    const src = this.makeNoiseSource();
 
     // Lowpass filter: keeps the deep rumble, discards the hissy top.
     const filter = ctx.createBiquadFilter();
@@ -424,29 +457,80 @@ class SoundKit {
 
     const ctx = this.ctx;
 
+    // Everything the engine makes is summed here before being filtered.
+    const mix = ctx.createGain();
+
+    // --- Layer 1: the fundamental, twice, slightly detuned ------------
+    // The detune is what stops it sounding like a flat electronic drone -
+    // the two drift in and out of phase and the result breathes.
     this.engineOsc1 = ctx.createOscillator();
     this.engineOsc2 = ctx.createOscillator();
     this.engineOsc1.type = 'sawtooth';
     this.engineOsc2.type = 'sawtooth';
-    this.engineOsc2.detune.value = 9;   // cents apart = a thicker, livelier note
+    this.engineOsc2.detune.value = 9;   // cents
 
+    const fundGain = ctx.createGain();
+    fundGain.gain.value = 0.55;
+    this.engineOsc1.connect(fundGain);
+    this.engineOsc2.connect(fundGain);
+    fundGain.connect(mix);
+
+    // --- Layer 2: an octave up ----------------------------------------
+    // This is the layer that actually survives a phone speaker. The
+    // fundamental sits too low to be reproduced on a handset, so without
+    // something an octave above it the engine all but disappears.
+    this.engineOsc3 = ctx.createOscillator();
+    this.engineOsc3.type = 'square';
+    const octGain = ctx.createGain();
+    octGain.gain.value = 0.22;
+    this.engineOsc3.connect(octGain);
+    octGain.connect(mix);
+
+    // --- Layer 3: combustion grit -------------------------------------
+    // A band of noise, pulsed by the same chug as everything else. This is
+    // most of what separates "engine" from "synthesiser holding a note".
+    const grit = this.makeNoiseSource();
+    const gritBand = ctx.createBiquadFilter();
+    gritBand.type = 'bandpass';
+    gritBand.frequency.value = 760;
+    gritBand.Q.value = 0.8;
+
+    this.engineGrit = ctx.createGain();
+    this.engineGrit.gain.value = CONFIG.ENGINE_GRIT;
+
+    grit.connect(gritBand);
+    gritBand.connect(this.engineGrit);
+    this.engineGrit.connect(mix);
+
+    // --- Shaping ------------------------------------------------------
+    // A resonant lowpass that opens as the revs climb, so the engine gets
+    // brighter and harder as well as higher.
     this.engineFilter = ctx.createBiquadFilter();
     this.engineFilter.type = 'lowpass';
-    this.engineFilter.Q.value = 1.2;
+    this.engineFilter.Q.value = 2.2;   // a little peak here reads as growl
 
     this.engineGain = ctx.createGain();
 
-    // A fast wobble on the volume is what gives the engine its "chug"
-    // instead of a smooth, lifeless hum.
-    const chug = ctx.createOscillator();
+    // The chug: a fast wobble on the volume. Its RATE climbs with the revs
+    // exactly as a real engine's firing rate does - holding it fixed is what
+    // made the old version sound lifeless. Triangle rather than sine gives
+    // a firmer pulse without the click a sawtooth would produce.
+    this.engineChug = ctx.createOscillator();
+    this.engineChug.type = 'triangle';
     const chugDepth = ctx.createGain();
-    chug.frequency.value = 7.5;
-    chugDepth.gain.value = CONFIG.ENGINE_VOLUME * 0.35;
-    chug.connect(chugDepth);
-    chugDepth.connect(this.engineGain.gain);   // adds to the gain we set below
+    chugDepth.gain.value = CONFIG.ENGINE_VOLUME * 0.45;
+    this.engineChug.connect(chugDepth);
+    chugDepth.connect(this.engineGain.gain);   // adds to the gain set below
 
-    this.engineOsc1.connect(this.engineFilter);
-    this.engineOsc2.connect(this.engineFilter);
+    // A slow, gentle wander on the pitch so it never sits perfectly still.
+    const wobble = ctx.createOscillator();
+    const wobbleDepth = ctx.createGain();
+    wobble.frequency.value = 0.7;
+    wobbleDepth.gain.value = 7;                // cents
+    wobble.connect(wobbleDepth);
+    wobbleDepth.connect(this.engineOsc1.detune);
+
+    mix.connect(this.engineFilter);
     this.engineFilter.connect(this.engineGain);
     this.engineGain.connect(this.master);
 
@@ -454,7 +538,10 @@ class SoundKit {
 
     this.engineOsc1.start();
     this.engineOsc2.start();
-    chug.start();
+    this.engineOsc3.start();
+    this.engineChug.start();
+    wobble.start();
+    grit.start();
   }
 
   /* How hard the car is being driven: 0 = sitting still, 1 = full tilt.
@@ -470,12 +557,22 @@ class SoundKit {
     const hz = CONFIG.ENGINE_BASE_HZ + l * CONFIG.ENGINE_REV_HZ;
     this.engineOsc1.frequency.value = hz;
     this.engineOsc2.frequency.value = hz;
+    this.engineOsc3.frequency.value = hz * 2;   // the octave-up layer
+
+    // The firing rate climbs with the revs, which is what makes accelerating
+    // sound like accelerating rather than just like a rising note.
+    this.engineChug.frequency.value = CONFIG.ENGINE_CHUG_MIN_HZ
+      + l * (CONFIG.ENGINE_CHUG_MAX_HZ - CONFIG.ENGINE_CHUG_MIN_HZ);
 
     // Open the filter up as it revs, so it gets brighter as well as higher.
-    this.engineFilter.frequency.value = 420 + l * 700;
+    this.engineFilter.frequency.value = 500 + l * 1400;
 
-    // ...and a little louder. Never louder than the chug wobble allows for,
-    // so the gain can't swing negative.
+    // Lean on the grit under load - an engine working hard is rougher.
+    this.engineGrit.gain.value = CONFIG.ENGINE_GRIT * (0.8 + 0.6 * l);
+
+    // ...and a little louder overall. The floor here has to stay above the
+    // chug's depth, or the wobble would swing the gain negative and the
+    // engine would audibly tear.
     this.engineGain.gain.value = CONFIG.ENGINE_VOLUME * (0.75 + 0.5 * l);
   }
 
