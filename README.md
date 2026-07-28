@@ -162,6 +162,24 @@ Set `debug: true` in the `physics.arcade` block to see the collision boxes.
 `window.game` is exposed too, so `game.scene.keys.CarScene` reaches the live
 game from the browser console.
 
+## Screen shapes
+
+The canvas is a fixed 450 wide, but its height is worked out at start-up from
+the shape of the screen it landed on. That means the game fills the display
+edge to edge on any phone instead of sitting in black bars — a 16:9 handset
+gets a 450×800 canvas, a 20:9 one gets 450×999, and both are letterbox-free.
+
+Holding the width fixed is what keeps play identical everywhere: the car and
+the bubbles stay the same size relative to the road on every device. Only the
+amount of road above you changes, so a taller phone gives slightly more time
+to read each word.
+
+The height is clamped to 720–1150. Below that a landscape desktop window would
+ask for a canvas too short to fit the controls; above it the layout stretches
+past what it was designed for. Outside the clamp the game letterboxes rather
+than breaking, and the page background is set to the road colour so any bars
+read as more road.
+
 ## How it's built
 
 One file, no assets. Everything on screen is drawn in code — the car and the

@@ -12,7 +12,7 @@
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="theme-color" content="#2b2f3a" />
+  <meta name="theme-color" content="#35383f" />
 
   <style>
     html, body {
@@ -20,7 +20,7 @@
       padding: 0;
       height: 100%;
       overflow: hidden;
-      background: #2b2f3a;
+      background: #35383f;
 
       /* Kill the browser's own touch gestures so drags belong to the game:
          - touch-action: none      -> no scrolling / pinching inside the canvas
@@ -78,8 +78,24 @@ const CONFIG = {
   // The game's internal "paper size". Phaser draws to this fixed portrait
   // canvas and then scales the whole thing to fit the real screen, so the
   // game looks identical on every phone.
-  GAME_WIDTH:  450,
-  GAME_HEIGHT: 800,
+  // The width is fixed. Everything measured in pixels - the car, the
+  // bubbles, the road - keeps the same proportion to the road on every
+  // device because of it, so the game plays identically on a small phone
+  // and a large one.
+  GAME_WIDTH: 450,
+
+  // The height is NOT fixed. It's worked out at start-up from the shape of
+  // the screen the game actually landed on (see pickGameHeight), so the
+  // canvas matches the display and Scale.FIT has nothing left to letterbox.
+  // A tall phone simply gets more road, which also means more time to read.
+  GAME_HEIGHT: 800,   // replaced at boot; this is only the fallback
+
+  // Shapes the layout was never designed for - a desktop browser in
+  // landscape would otherwise ask for a canvas 250px tall and the finish
+  // card would collide with the controls. Outside this range we accept a
+  // little letterboxing rather than a broken layout.
+  MIN_GAME_HEIGHT: 720,
+  MAX_GAME_HEIGHT: 1150,
 
   // --- Car ---
   // The car artwork is drawn at exactly this size, so its on-screen scale
@@ -1216,7 +1232,11 @@ class CarScene extends Phaser.Scene {
     // there's a speed control at all.
     this.speedHint = this.add.container(0, 0).setDepth(9);
 
-    const speedWord = this.add.text(258, 470, 'Speed', {
+    // Anchored to the track rather than to fixed pixels, so the hint follows
+    // the selector on whatever shape of screen the game ends up on.
+    const hintY = this.sliderTop - 40;
+
+    const speedWord = this.add.text(W * 0.57, hintY, 'Speed', {
       fontFamily: CONFIG.BUBBLE_FONT,
       fontSize: '38px',
       fontStyle: 'bold',
@@ -1228,8 +1248,8 @@ class CarScene extends Phaser.Scene {
     // An arrow drawn from the word down to the knob. Working the head out
     // from the line's own direction means the two can never disagree, however
     // the endpoints are moved.
-    const from = new Phaser.Math.Vector2(206, 495);
-    const to   = new Phaser.Math.Vector2(86, 646);
+    const from = new Phaser.Math.Vector2(W * 0.44, hintY + 26);
+    const to   = new Phaser.Math.Vector2(CONFIG.SLIDER_X + 46, this.sliderMid - 30);
     const dir  = to.clone().subtract(from).normalize();
     const perp = new Phaser.Math.Vector2(-dir.y, dir.x);
     const base = to.clone().subtract(dir.clone().scale(26));
@@ -2198,12 +2218,38 @@ class CarScene extends Phaser.Scene {
 
 
 /* ---------------------------------------------------------------------
-   4. BOOT THE GAME
+   5. BOOT THE GAME
    ------------------------------------------------------------------ */
+
+/* Match the canvas to the shape of the screen it's running on.
+
+   Phones are all sorts of shapes now - a 16:9 handset and a 20:9 one differ
+   by about a fifth of the display. With a fixed 450x800 canvas, Scale.FIT
+   copes by letterboxing, which is unremarkable in a browser tab but reads as
+   unfinished when the game is a full-screen app.
+
+   So the width stays fixed and the height follows the device. The canvas
+   then already matches the display, FIT has nothing left to trim, and the
+   game fills the screen edge to edge. Everything positioned as a fraction of
+   the height moves with it; everything anchored to an edge stays where it is.
+*/
+function pickGameHeight(width) {
+  const vw = window.innerWidth  || width;
+  const vh = window.innerHeight || CONFIG.GAME_HEIGHT;
+
+  return Phaser.Math.Clamp(
+    Math.round(width * (vh / vw)),
+    CONFIG.MIN_GAME_HEIGHT,
+    CONFIG.MAX_GAME_HEIGHT
+  );
+}
+
+CONFIG.GAME_HEIGHT = pickGameHeight(CONFIG.GAME_WIDTH);
+
 const game = new Phaser.Game({
   type: Phaser.AUTO,          // WebGL if the device supports it, else Canvas
   parent: 'game',             // draw into the <div id="game">
-  backgroundColor: '#2b2f3a',
+  backgroundColor: '#35383f',
 
   scale: {
     // FIT: keep our 450x800 portrait shape and scale it to fill as much of
@@ -2211,7 +2257,7 @@ const game = new Phaser.Game({
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
     width:  CONFIG.GAME_WIDTH,
-    height: CONFIG.GAME_HEIGHT
+    height: CONFIG.GAME_HEIGHT   // set just above, from the real screen shape
   },
 
   physics: {
