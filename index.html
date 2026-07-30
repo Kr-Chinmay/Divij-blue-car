@@ -45,6 +45,10 @@
 
   <!-- Phaser 3 straight from a CDN. No build step, no npm, no local files. -->
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+
+  <!-- The logo, shared with icon.html so the badge on the home screen and
+       the launcher icon are drawn by the same code and cannot drift apart. -->
+  <script src="logo.js"></script>
 </head>
 <body>
   <div id="game"></div>
@@ -2271,7 +2275,142 @@ class CarScene extends Phaser.Scene {
 
 
 /* ---------------------------------------------------------------------
-   5. BOOT THE GAME
+   5. THE HOME SCREEN
+   The first thing the app shows: the logo, the name, a kind word, and a
+   button. Kept as its own Scene rather than an overlay inside the game,
+   so the game itself starts from a clean slate every time it is entered.
+   ------------------------------------------------------------------ */
+class HomeScene extends Phaser.Scene {
+
+  constructor() {
+    super('HomeScene');
+  }
+
+  create() {
+    const W = this.scale.width;
+    const H = this.scale.height;
+
+    // --- A quiet version of the road, so arriving in the game feels like
+    // --- carrying on rather than jumping somewhere else --------------
+    const roadLeft  = W * CONFIG.SIDE_STRIP_FRAC;
+    const roadRight = W * (1 - CONFIG.SIDE_STRIP_FRAC);
+
+    this.add.rectangle(W / 2, H / 2, W, H, CONFIG.FIELD_COLOURS[0]);
+    this.add.rectangle(W / 2, H / 2, roadRight - roadLeft, H, CONFIG.ROAD_COLOR);
+    this.add.rectangle(roadLeft + 3,  H / 2, 4, H, CONFIG.EDGE_LINE_COLOR, 0.75);
+    this.add.rectangle(roadRight - 3, H / 2, 4, H, CONFIG.EDGE_LINE_COLOR, 0.75);
+    for (let y = 40; y < H; y += 90) {
+      this.add.rectangle(W / 2, y, 7, 46, CONFIG.LANE_COLOR, 0.9);
+    }
+
+    // --- Logo -------------------------------------------------------
+    // Drawn to an ordinary canvas by logo.js, then handed to Phaser as a
+    // texture. Same code as the launcher icon, so the two always match.
+    const logoPx = 260;
+    if (!this.textures.exists('logo')) {
+      const canvas = document.createElement('canvas');
+      canvas.width = logoPx;
+      canvas.height = logoPx;
+      window.MiniDriverLogo.drawLogo(canvas.getContext('2d'), logoPx, false);
+      this.textures.addCanvas('logo', canvas);
+    }
+
+    const logo = this.add.image(W / 2, H * 0.30, 'logo').setDisplaySize(190, 190);
+
+    // A slow breathing float, so the screen isn't dead still while a child
+    // works out what to do.
+    this.tweens.add({
+      targets: logo, y: logo.y - 10, duration: 1800,
+      yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
+    });
+
+    // --- Name -------------------------------------------------------
+    // Two lines: the full name on one line would have to shrink to about
+    // 20px to fit 450 across, which is smaller than the score.
+    const titleStyle = {
+      fontFamily: CONFIG.BUBBLE_FONT, fontStyle: 'bold',
+      color: '#ffffff', stroke: CONFIG.BUBBLE_STROKE_COLOR, strokeThickness: 7,
+      align: 'center'
+    };
+
+    this.add.text(W / 2, H * 0.50, 'Mini Driver,',
+                  { ...titleStyle, fontSize: '42px' }).setOrigin(0.5);
+    this.add.text(W / 2, H * 0.565, 'Mega Values',
+                  { ...titleStyle, fontSize: '42px', color: '#ffd54f' }).setOrigin(0.5);
+
+    // --- "Made with (heart) for Kids" -------------------------------
+    // The heart is a drawn shape, not a typed character. A glyph would be
+    // at the mercy of whatever font the phone happens to have; a shape
+    // always renders.
+    this.buildHeartTexture();
+
+    const noteStyle = {
+      fontFamily: CONFIG.BUBBLE_FONT, fontSize: '22px',
+      color: '#e6e9f0', stroke: CONFIG.BUBBLE_STROKE_COLOR, strokeThickness: 4
+    };
+    const noteY = H * 0.645;
+
+    const before = this.add.text(0, noteY, 'Made with', noteStyle).setOrigin(0, 0.5);
+    const after  = this.add.text(0, noteY, 'for Kids',  noteStyle).setOrigin(0, 0.5);
+    const heart  = this.add.image(0, noteY, 'heart').setOrigin(0.5);
+
+    // Lay the three pieces out as one centred row, measuring the text
+    // rather than guessing at where it ends.
+    const gap = 9;
+    const heartW = heart.width;
+    const rowW = before.width + gap + heartW + gap + after.width;
+
+    let x = W / 2 - rowW / 2;
+    before.x = x;                    x += before.width + gap;
+    heart.x  = x + heartW / 2;       x += heartW + gap;
+    after.x  = x;
+
+    // --- Play button ------------------------------------------------
+    const btnY = H * 0.78;
+    const btn = this.add.rectangle(W / 2, btnY, 240, 78, 0x4caf50)
+      .setStrokeStyle(5, 0xffffff, 0.95)
+      .setInteractive({ useHandCursor: true });
+
+    const btnLabel = this.add.text(W / 2, btnY, 'PLAY', {
+      ...titleStyle, fontSize: '38px'
+    }).setOrigin(0.5);
+
+    this.tweens.add({
+      targets: [btn, btnLabel], scaleX: 1.05, scaleY: 1.05,
+      duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
+    });
+
+    btn.on('pointerdown', () => {
+      this.tweens.killTweensOf([btn, btnLabel]);
+      this.scene.start('CarScene');
+    });
+
+    // --- Best score so far, if there is one -------------------------
+    const best = loadHighScores()[0];
+    if (best) {
+      this.add.text(W / 2, H * 0.90, 'Best: ' + best.name + '  ' + best.score, {
+        fontFamily: CONFIG.BUBBLE_FONT, fontSize: '22px',
+        color: '#9aa4b8', stroke: CONFIG.BUBBLE_STROKE_COLOR, strokeThickness: 4
+      }).setOrigin(0.5);
+    }
+  }
+
+  buildHeartTexture() {
+    if (this.textures.exists('heart')) return;
+
+    const g = this.make.graphics({ add: false });
+    g.fillStyle(0xff5a72, 1);
+    g.fillCircle(9, 10, 9);        // left lobe
+    g.fillCircle(23, 10, 9);       // right lobe
+    g.fillTriangle(1, 13, 31, 13, 16, 31);   // the point below them
+    g.generateTexture('heart', 32, 32);
+    g.destroy();
+  }
+}
+
+
+/* ---------------------------------------------------------------------
+   6. BOOT THE GAME
    ------------------------------------------------------------------ */
 
 /* Match the canvas to the shape of the screen it's running on.
@@ -2331,7 +2470,8 @@ const game = new Phaser.Game({
   // game coordinates however the canvas is scaled.
   dom: { createContainer: true },
 
-  scene: [CarScene]
+  // HomeScene is listed first, so it is what the app opens on.
+  scene: [HomeScene, CarScene]
 });
 
 // Handy when you're tinkering: open the browser console and you can reach

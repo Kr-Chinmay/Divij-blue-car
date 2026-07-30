@@ -1,8 +1,11 @@
-# Divij's Blue Car
+# Mini Driver, Mega Values
 
 A gentle browser game for phones. Drag the blue car down a country road and
 drive into the floating bubbles to score points. No obstacles, no timer, no way
 to lose.
+
+Opens on a home screen carrying the logo, the name, and *Made with ♥ for Kids*,
+with a Play button and the best score so far.
 
 Most bubbles carry one of twenty kind words — *Kind*, *Share*, *Brave*,
 *Keep Going* and so on. Catch those.
@@ -179,6 +182,30 @@ ask for a canvas too short to fit the controls; above it the layout stretches
 past what it was designed for. Outside the clamp the game letterboxes rather
 than breaking, and the page background is set to the road colour so any bars
 read as more road.
+
+## The logo and app icons
+
+`logo.js` is the only place the logo is defined — a blue smiling car on the
+game's own orange (`#ffa726`). It's drawn with plain Canvas 2D rather than with
+Phaser, because the same code has to produce both the badge on the home screen
+and the PNG files Android wants, and Phaser isn't available in the second case.
+Every measurement is a fraction of the size requested, so one function draws
+correctly at 48px in an app drawer and at 1024px for a store listing.
+
+Open `icon.html` in a browser to save the icon files. It offers:
+
+- **1024×1024 master** — feed this to `@capacitor/assets` or Android Studio's
+  Image Asset wizard and every launcher size is generated from it.
+- **512×512 square** — the Play Store listing icon. Google applies its own
+  mask, so this one deliberately has no rounded corners and no transparency.
+- **Adaptive icon layers** — a transparent foreground plus a flat `#ffa726`
+  background. Android crops these to whatever shape a launcher prefers and only
+  guarantees the middle 66%, so the car is drawn smaller here to keep its
+  wheels out of the crop. Verified: zero pixels fall outside that safe zone.
+
+Sharing one file between the game and the icon builder is the reason the
+project is no longer a single `index.html`. It's a deliberate trade: an icon
+that silently drifts away from the car in the game would be worse.
 
 ## How it's built
 

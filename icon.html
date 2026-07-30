@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mini Driver, Mega Values - icon builder</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body {
+      margin: 0;
+      padding: 28px;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #16181e;
+      color: #e6e9f0;
+      line-height: 1.6;
+    }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    h2 { font-size: 16px; margin: 28px 0 8px; color: #9aa4b8; font-weight: bold; }
+    p  { max-width: 640px; color: #c3cad8; margin: 8px 0; }
+    .row { display: flex; flex-wrap: wrap; gap: 22px; margin-top: 12px; }
+    .item { text-align: center; }
+    .item canvas {
+      display: block;
+      background: repeating-conic-gradient(#2a2d36 0% 25%, #22252c 0% 50%) 50% / 16px 16px;
+      border-radius: 8px;
+    }
+    .item .label { font-size: 13px; color: #9aa4b8; margin-top: 6px; }
+    a.dl {
+      display: inline-block; margin-top: 6px; padding: 6px 12px;
+      background: #2f6fed; color: #fff; text-decoration: none;
+      border-radius: 6px; font-size: 13px;
+    }
+    a.dl:hover { background: #4b87f2; }
+    code { background: #22252c; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+  </style>
+  <script src="logo.js"></script>
+</head>
+<body>
+
+<h1>Mini Driver, Mega Values &mdash; icon builder</h1>
+<p>
+  Every image below is drawn live from <code>logo.js</code>, the same file the
+  game uses for the badge on its home screen. Click a button to save the PNG.
+  The chequerboard shows where a file is transparent.
+</p>
+
+<h2>1. Source icon &mdash; start here</h2>
+<p>
+  A single 1024&times;1024 master. Android tooling
+  (<code>@capacitor/assets</code>, or Android Studio's Image Asset wizard)
+  generates every launcher size from this one file.
+</p>
+<div class="row" id="source"></div>
+
+<h2>2. Play Store listing</h2>
+<p>
+  Google asks for exactly 512&times;512 with no transparency and no rounded
+  corners &mdash; the store applies its own mask, so a pre-rounded icon ends up
+  clipped twice and looks wrong.
+</p>
+<div class="row" id="store"></div>
+
+<h2>3. Adaptive icon layers</h2>
+<p>
+  Modern Android composes an icon from two layers and crops them to whatever
+  shape the launcher prefers &mdash; circle, squircle, teardrop. Only the middle
+  66% is guaranteed to survive, so the car here is drawn smaller to keep its
+  wheels out of the crop. Pair the foreground with a plain
+  <code>#ffa726</code> background colour.
+</p>
+<div class="row" id="adaptive"></div>
+
+<script>
+function make(parent, size, shown, label, file, draw) {
+  const wrap = document.createElement('div');
+  wrap.className = 'item';
+
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  canvas.style.width = shown + 'px';
+  canvas.style.height = shown + 'px';
+  draw(canvas.getContext('2d'), size);
+
+  const cap = document.createElement('div');
+  cap.className = 'label';
+  cap.textContent = label;
+
+  const link = document.createElement('a');
+  link.className = 'dl';
+  link.textContent = 'Download';
+  link.download = file;
+  // toDataURL rather than a Blob: this page is opened straight off the disk
+  // as often as over http, and a data URL downloads correctly either way.
+  link.href = canvas.toDataURL('image/png');
+
+  wrap.appendChild(canvas);
+  wrap.appendChild(cap);
+  wrap.appendChild(link);
+  parent.appendChild(wrap);
+}
+
+const L = window.MiniDriverLogo;
+
+make(document.getElementById('source'), 1024, 200,
+     '1024 x 1024 master', 'icon-1024.png',
+     (ctx, s) => L.drawLogo(ctx, s, false));
+
+make(document.getElementById('store'), 512, 160,
+     '512 x 512, square', 'play-listing-512.png',
+     (ctx, s) => L.drawLogo(ctx, s, true));
+
+make(document.getElementById('adaptive'), 1024, 160,
+     'Foreground layer', 'adaptive-foreground-1024.png',
+     (ctx, s) => L.drawCar(ctx, s, 0.62));
+
+make(document.getElementById('adaptive'), 1024, 160,
+     'Background layer', 'adaptive-background-1024.png',
+     (ctx, s) => { ctx.fillStyle = L.COLOURS.background; ctx.fillRect(0, 0, s, s); });
+</script>
+
+</body>
+</html>
