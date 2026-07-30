@@ -829,10 +829,12 @@ class CarScene extends Phaser.Scene {
     g.fillStyle(CONFIG.CAR_ROOF_COLOR, 1);
     g.fillRoundedRect(bx + 11, 50, bw - 22, 36, 4);
 
-    // ROOF RAILS: two slim dark bars running the length of the roof...
+    // ROOF RAILS: two slim dark bars running the length of the roof.
+    // They start where the roof does rather than two pixels earlier - any
+    // sooner and their tips poke up into the windscreen as dark specks.
     g.fillStyle(0x20262f, 1);
-    g.fillRoundedRect(bx + 10,      48, 3, 40, 1.5);
-    g.fillRoundedRect(bx + bw - 13, 48, 3, 40, 1.5);
+    g.fillRoundedRect(bx + 10,      50, 3, 36, 1.5);
+    g.fillRoundedRect(bx + bw - 13, 50, 3, 36, 1.5);
 
     // ...with two crossbars spanning between them. This is the detail that
     // most says "this particular car" in the reference photo.
@@ -842,8 +844,10 @@ class CarScene extends Phaser.Scene {
     // --- Tail ---------------------------------------------------------
     // A spoiler lip above the rear screen, then the screen, then lights
     // that wrap around the back corners.
-    g.fillStyle(0x1d4fb5, 1);
-    g.fillRoundedRect(bx + 3, 84, bw - 6, 4, 2);
+    // Dark enough to actually read as a lip. The first attempt used a blue
+    // only a shade off the bodywork and vanished into it completely.
+    g.fillStyle(0x16233d, 1);
+    g.fillRoundedRect(bx + 3, 85, bw - 6, 3, 1.5);
 
     g.fillStyle(CONFIG.CAR_GLASS_COLOR, 1);
     g.fillRoundedRect(bx + 5, 89, bw - 10, 10, 3);
