@@ -196,6 +196,10 @@ const CONFIG = {
   // Badge colours for the bonus values, keyed by the value itself.
   BONUS_COLOURS: { 3: 0x00bfa5, 5: 0xffb300 },   // teal, gold
 
+  // Filled in once the app is published. Until then Rate Us says so rather
+  // than opening a link that does not exist yet.
+  PLAY_STORE_URL: '',
+
   // --- High scores ---
   HIGHSCORE_KEY:  'divijs-blue-car-highscores',
   HIGHSCORE_KEEP: 5,       // how many places the table holds
@@ -2315,7 +2319,7 @@ class HomeScene extends Phaser.Scene {
       this.textures.addCanvas('logo', canvas);
     }
 
-    const logo = this.add.image(W / 2, H * 0.30, 'logo').setDisplaySize(190, 190);
+    const logo = this.add.image(W / 2, H * 0.26, 'logo').setDisplaySize(170, 170);
 
     // A slow breathing float, so the screen isn't dead still while a child
     // works out what to do.
@@ -2333,10 +2337,10 @@ class HomeScene extends Phaser.Scene {
       align: 'center'
     };
 
-    this.add.text(W / 2, H * 0.50, 'Mini Driver,',
-                  { ...titleStyle, fontSize: '42px' }).setOrigin(0.5);
-    this.add.text(W / 2, H * 0.565, 'Mega Values',
-                  { ...titleStyle, fontSize: '42px', color: '#ffd54f' }).setOrigin(0.5);
+    this.add.text(W / 2, H * 0.455, 'Mini Driver,',
+                  { ...titleStyle, fontSize: '40px' }).setOrigin(0.5);
+    this.add.text(W / 2, H * 0.515, 'Mega Values',
+                  { ...titleStyle, fontSize: '40px', color: '#ffd54f' }).setOrigin(0.5);
 
     // --- "Made with (heart) for Kids" -------------------------------
     // The heart is a drawn shape, not a typed character. A glyph would be
@@ -2348,7 +2352,7 @@ class HomeScene extends Phaser.Scene {
       fontFamily: CONFIG.BUBBLE_FONT, fontSize: '22px',
       color: '#e6e9f0', stroke: CONFIG.BUBBLE_STROKE_COLOR, strokeThickness: 4
     };
-    const noteY = H * 0.645;
+    const noteY = H * 0.585;
 
     const before = this.add.text(0, noteY, 'Made with', noteStyle).setOrigin(0, 0.5);
     const after  = this.add.text(0, noteY, 'for Kids',  noteStyle).setOrigin(0, 0.5);
@@ -2366,7 +2370,10 @@ class HomeScene extends Phaser.Scene {
     after.x  = x;
 
     // --- Play button ------------------------------------------------
-    const btnY = H * 0.78;
+    // Deliberately the largest thing on the screen. The four options below
+    // it are grown-up concerns; this is the only one a five-year-old wants,
+    // so it should be impossible to miss.
+    const btnY = H * 0.70;
     const btn = this.add.rectangle(W / 2, btnY, 240, 78, 0x4caf50)
       .setStrokeStyle(5, 0xffffff, 0.95)
       .setInteractive({ useHandCursor: true });
@@ -2385,14 +2392,148 @@ class HomeScene extends Phaser.Scene {
       this.scene.start('CarScene');
     });
 
+    // --- The four grown-up options ----------------------------------
+    // Small, but in the game's own bubble colours so the row still reads as
+    // part of the same world rather than as a settings bar bolted on.
+    const optY = H * 0.83;
+
+    const options = [
+      ['ℹ️',  'How to Play', 0x4fc3f7, () => this.showHowToPlay()],
+      ['🔒', 'Privacy',     0xab7df6, () => this.showPrivacy()],
+      ['⭐', 'Rate Us',     0xffd54f, () => this.rateUs()]
+    ];
+
+    // Centred from the count rather than from a hardcoded offset, so adding
+    // or removing an option later cannot leave the row sitting off-centre.
+    const spacing = 108;
+    const startX = W / 2 - spacing * (options.length - 1) / 2;
+
+    options.forEach(([icon, label, colour, onTap], i) => {
+      const x = startX + spacing * i;
+
+      const disc = this.add.circle(x, optY, 34, colour)
+        .setStrokeStyle(4, 0xffffff, 0.95)
+        .setInteractive({ useHandCursor: true });
+
+      this.add.text(x, optY, icon, { fontSize: '30px' }).setOrigin(0.5);
+
+      this.add.text(x, optY + 50, label, {
+        fontFamily: CONFIG.BUBBLE_FONT, fontSize: '13px', fontStyle: 'bold',
+        color: '#ffffff', stroke: CONFIG.BUBBLE_STROKE_COLOR, strokeThickness: 4
+      }).setOrigin(0.5);
+
+      // A quick squeeze on tap, so a press that opens nothing visible - Rate
+      // Us today - still feels like it registered.
+      disc.on('pointerdown', () => {
+        this.tweens.killTweensOf(disc);
+        disc.setScale(1);
+        this.tweens.add({ targets: disc, scale: 1.18, duration: 90, yoyo: true });
+        onTap();
+      });
+    });
+
     // --- Best score so far, if there is one -------------------------
     const best = loadHighScores()[0];
     if (best) {
-      this.add.text(W / 2, H * 0.90, 'Best: ' + best.name + '  ' + best.score, {
+      this.add.text(W / 2, H * 0.955, 'Best: ' + best.name + '  ' + best.score, {
         fontFamily: CONFIG.BUBBLE_FONT, fontSize: '22px',
         color: '#9aa4b8', stroke: CONFIG.BUBBLE_STROKE_COLOR, strokeThickness: 4
       }).setOrigin(0.5);
     }
+  }
+
+  /* -------------------------------------------------------------------
+     A read-and-dismiss overlay.
+
+     Deliberately an overlay rather than another Scene: these are things you
+     glance at once and close, not places you navigate to, and a Scene would
+     mean losing and rebuilding the home screen behind it.
+     ---------------------------------------------------------------- */
+  showPanel(title, paragraphs) {
+    if (this.panel) return;   // one at a time
+
+    const W = this.scale.width;
+    const H = this.scale.height;
+
+    this.panel = this.add.container(0, 0).setDepth(50);
+
+    // The dim layer is interactive on purpose: it swallows taps meant for
+    // the buttons underneath, so nothing can be pressed by accident through
+    // an open panel.
+    const dim = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.75).setInteractive();
+
+    const card = this.add.rectangle(W / 2, H * 0.48, W * 0.88, H * 0.70, 0x101a2e, 0.98)
+      .setStrokeStyle(5, 0xffd54f, 0.95);
+
+    const heading = this.add.text(W / 2, H * 0.18, title, {
+      fontFamily: CONFIG.BUBBLE_FONT, fontSize: '30px', fontStyle: 'bold',
+      color: '#ffd54f', stroke: CONFIG.BUBBLE_STROKE_COLOR, strokeThickness: 6
+    }).setOrigin(0.5);
+
+    const body = this.add.text(W * 0.12, H * 0.24, paragraphs.join('\n\n'), {
+      fontFamily: CONFIG.BUBBLE_FONT, fontSize: '17px',
+      color: '#e6e9f0', lineSpacing: 5,
+      wordWrap: { width: W * 0.76 }
+    }).setOrigin(0, 0);
+
+    const closeY = H * 0.77;
+    const close = this.add.rectangle(W / 2, closeY, 170, 58, 0x4caf50)
+      .setStrokeStyle(4, 0xffffff, 0.95)
+      .setInteractive({ useHandCursor: true });
+
+    const closeLabel = this.add.text(W / 2, closeY, 'Close', {
+      fontFamily: CONFIG.BUBBLE_FONT, fontSize: '26px', fontStyle: 'bold',
+      color: '#ffffff', stroke: CONFIG.BUBBLE_STROKE_COLOR, strokeThickness: 5
+    }).setOrigin(0.5);
+
+    close.on('pointerdown', () => {
+      this.panel.destroy();
+      this.panel = null;
+    });
+
+    this.panel.add([dim, card, heading, body, close, closeLabel]);
+  }
+
+  showHowToPlay() {
+    this.showPanel('How to Play', [
+      'Drag anywhere on the screen to steer the car.',
+      'Catch the bubbles with kind words inside them. Each one is worth a point, and some are worth +3 or +5.',
+      'Dodge the grey spiky ones. Those are habits to avoid, and hitting one costs a point.',
+      'Tap 1, 2 or 3 on the left to drive faster. Faster means less time to read, so it is a real choice.',
+      'A full run is 100 bubbles, then you can put your name on the board.'
+    ]);
+  }
+
+  showPrivacy() {
+    this.showPanel('Privacy', [
+      'This game does not collect, store or send any information about you or your child.',
+      'There is no sign-in, there are no accounts, no adverts and no tracking of any kind.',
+      'Best scores are saved on this device only. Nobody else can see them, and clearing the app\'s data erases them for good.',
+      'Played in a web browser, the game engine is fetched from a public code library. In the installed app everything is bundled, and the game makes no internet connection at all.'
+    ]);
+  }
+
+  rateUs() {
+    if (CONFIG.PLAY_STORE_URL) {
+      window.open(CONFIG.PLAY_STORE_URL, '_blank');
+    } else {
+      this.toast('Coming soon!');
+    }
+  }
+
+  toast(message) {
+    const W = this.scale.width;
+    const H = this.scale.height;
+
+    const t = this.add.text(W / 2, H * 0.90, message, {
+      fontFamily: CONFIG.BUBBLE_FONT, fontSize: '20px', fontStyle: 'bold',
+      color: '#ffffff', stroke: CONFIG.BUBBLE_STROKE_COLOR, strokeThickness: 5
+    }).setOrigin(0.5).setDepth(60);
+
+    this.tweens.add({
+      targets: t, alpha: 0, delay: 1300, duration: 500,
+      onComplete: () => t.destroy()
+    });
   }
 
   buildHeartTexture() {
@@ -2470,7 +2611,8 @@ const game = new Phaser.Game({
   // game coordinates however the canvas is scaled.
   dom: { createContainer: true },
 
-  // HomeScene is listed first, so it is what the app opens on.
+  // HomeScene is listed first, so it is what the app opens on. Everything
+  // else lives on that one screen as overlays, so there is no menu scene.
   scene: [HomeScene, CarScene]
 });
 
