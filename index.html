@@ -2470,13 +2470,28 @@ class HomeScene extends Phaser.Scene {
       color: '#ffd54f', stroke: CONFIG.BUBBLE_STROKE_COLOR, strokeThickness: 6
     }).setOrigin(0.5);
 
-    const body = this.add.text(W * 0.12, H * 0.24, paragraphs.join('\n\n'), {
-      fontFamily: CONFIG.BUBBLE_FONT, fontSize: '17px',
+    const closeY = H * 0.77;
+
+    // Fit the text to the space rather than trusting a fixed size. The first
+    // attempt used 17px everywhere and the copy ran straight down through the
+    // Close button - and it would have been worse on a short screen, where
+    // there is a fifth less room. Stepping the size down until it measures
+    // as fitting is the same trick the word bubbles use.
+    const bodyTop  = H * 0.24;
+    const bodyMaxH = (closeY - 34) - bodyTop;   // stop short of the button
+
+    const body = this.add.text(W * 0.12, bodyTop, paragraphs.join('\n\n'), {
+      fontFamily: CONFIG.BUBBLE_FONT, fontSize: '18px',
       color: '#e6e9f0', lineSpacing: 5,
       wordWrap: { width: W * 0.76 }
     }).setOrigin(0, 0);
 
-    const closeY = H * 0.77;
+    let size = 18;
+    while (size > 11 && body.height > bodyMaxH) {
+      size -= 1;
+      body.setFontSize(size);
+    }
+
     const close = this.add.rectangle(W / 2, closeY, 170, 58, 0x4caf50)
       .setStrokeStyle(4, 0xffffff, 0.95)
       .setInteractive({ useHandCursor: true });
@@ -2497,19 +2512,19 @@ class HomeScene extends Phaser.Scene {
   showHowToPlay() {
     this.showPanel('How to Play', [
       'Drag anywhere on the screen to steer the car.',
-      'Catch the bubbles with kind words inside them. Each one is worth a point, and some are worth +3 or +5.',
-      'Dodge the grey spiky ones. Those are habits to avoid, and hitting one costs a point.',
-      'Tap 1, 2 or 3 on the left to drive faster. Faster means less time to read, so it is a real choice.',
-      'A full run is 100 bubbles, then you can put your name on the board.'
+      'Catch the bubbles with kind words in them. Some are worth +3 or +5.',
+      'Dodge the grey spiky ones. Hitting one costs a point.',
+      'Tap 1, 2 or 3 on the left to drive faster. Faster leaves less time to read, so it is a real choice.',
+      'A run is 100 bubbles, then you can put your name on the board.'
     ]);
   }
 
   showPrivacy() {
     this.showPanel('Privacy', [
       'This game does not collect, store or send any information about you or your child.',
-      'There is no sign-in, there are no accounts, no adverts and no tracking of any kind.',
-      'Best scores are saved on this device only. Nobody else can see them, and clearing the app\'s data erases them for good.',
-      'Played in a web browser, the game engine is fetched from a public code library. In the installed app everything is bundled, and the game makes no internet connection at all.'
+      'No sign-in, no accounts, no adverts, no tracking of any kind.',
+      'Best scores are saved on this device only. Nobody else can see them, and clearing the app\'s data erases them.',
+      'In a browser, the game engine is fetched from a public code library. The installed app bundles everything and makes no internet connection at all.'
     ]);
   }
 
