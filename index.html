@@ -200,6 +200,24 @@ const CONFIG = {
   // than opening a link that does not exist yet.
   PLAY_STORE_URL: '',
 
+  // --- End of run ---
+  // What the finish card says instead of just announcing the run is over.
+  //
+  // The first band the score falls inside wins, so these must stay in
+  // ascending order and each `upTo` is INCLUSIVE - a score of exactly 50
+  // gets the first message, 100 the second, 130 the third. The last entry
+  // has no `upTo` and catches everything above.
+  //
+  // Note the first band also catches negative scores. The score can drop
+  // below zero by hitting the grey bubbles, and someone who finished on -8
+  // is exactly who most needs the gentlest message.
+  ENCOURAGEMENTS: [
+    { upTo:  50, text: 'More goodies await you, dear friend!' },
+    { upTo: 100, text: 'This is good, but my dear friend can do even better!' },
+    { upTo: 130, text: 'Dear friend, you are almost perfect!' },
+    {            text: 'Delicious performance! More stages coming soon!' }
+  ],
+
   // --- High scores ---
   HIGHSCORE_KEY:  'divijs-blue-car-highscores',
   HIGHSCORE_KEEP: 5,       // how many places the table holds
@@ -1905,9 +1923,9 @@ class CarScene extends Phaser.Scene {
     const W = this.scale.width;
     const H = this.scale.height;
 
-    this.banner = this.add.container(W / 2, H * 0.44).setDepth(20);
+    this.banner = this.add.container(W / 2, H * 0.46).setDepth(20);
 
-    const panel = this.add.rectangle(0, 0, W * 0.90, 480, 0x101a2e, 0.96);
+    const panel = this.add.rectangle(0, 0, W * 0.90, 560, 0x101a2e, 0.96);
     panel.setStrokeStyle(5, 0xffd54f, 0.95);
 
     this.titleStyle = {
@@ -1916,12 +1934,27 @@ class CarScene extends Phaser.Scene {
       align: 'center'
     };
 
+    // The encouragement leads, where "All 100 done!" used to. It says the run
+    // is over just as clearly, and says something kinder while it does it.
+    const cheer = this.add.text(0, -212, this.encouragementFor(this.score), {
+      ...this.titleStyle, fontSize: '26px', color: '#5ce6d0',
+      wordWrap: { width: W * 0.78 }
+    }).setOrigin(0.5);
+
+    // These messages are sentences, not labels - the longest runs to fifty
+    // characters and wraps to three lines. Shrink it to the space rather
+    // than trusting one size to suit all four.
+    let cheerSize = 26;
+    while (cheerSize > 15 && cheer.height > 84) {
+      cheerSize -= 1;
+      cheer.setFontSize(cheerSize);
+    }
+
     this.banner.add([
       panel,
-      this.add.text(0, -206, 'All ' + this.totalBubbles + ' done!',
-                    { ...this.titleStyle, fontSize: '34px' }).setOrigin(0.5),
-      this.add.text(0, -158, 'Score: ' + this.score,
-                    { ...this.titleStyle, fontSize: '48px', color: '#ffd54f' }).setOrigin(0.5)
+      cheer,
+      this.add.text(0, -130, 'Score: ' + this.score,
+                    { ...this.titleStyle, fontSize: '46px', color: '#ffd54f' }).setOrigin(0.5)
     ]);
 
     const scores = loadHighScores();
@@ -1951,25 +1984,27 @@ class CarScene extends Phaser.Scene {
      coordinates, so it stays put however the canvas is scaled.
      ---------------------------------------------------------------- */
   showNameEntry(scores) {
-    this.banner.add(
-      this.add.text(0, -104, 'New high score!',
-                    { ...this.titleStyle, fontSize: '26px', color: '#5ce6d0' }).setOrigin(0.5)
-    );
+    // Held onto rather than dropped into the container and forgotten: the
+    // table that replaces this form puts its own heading at the same height,
+    // so this one has to be cleared away or the two draw on top of each other.
+    const newBest = this.add.text(0, -78, 'New high score!',
+      { ...this.titleStyle, fontSize: '24px', color: '#ffd54f' }).setOrigin(0.5);
+    this.banner.add(newBest);
 
     const bannerY = this.banner.y;
 
-    this.nameInput = this.add.dom(this.banner.x, bannerY - 52).createFromHTML(
+    this.nameInput = this.add.dom(this.banner.x, bannerY - 32).createFromHTML(
       '<input type="text" maxlength="' + CONFIG.NAME_MAX_LEN + '" placeholder="Your name" ' +
       'style="width:210px;height:44px;font-size:22px;text-align:center;' +
       'border-radius:10px;border:3px solid #ffd54f;background:#f6f8ff;color:#101828;' +
       'font-family:Arial,Helvetica,sans-serif;outline:none;">'
     ).setDepth(21);
 
-    const saveBtn = this.add.rectangle(0, 8, 200, 52, 0x4caf50)
+    const saveBtn = this.add.rectangle(0, 42, 200, 52, 0x4caf50)
       .setStrokeStyle(4, 0xffffff, 0.9)
       .setInteractive({ useHandCursor: true });
 
-    const saveLabel = this.add.text(0, 8, 'Save',
+    const saveLabel = this.add.text(0, 42, 'Save',
       { ...this.titleStyle, fontSize: '28px' }).setOrigin(0.5);
 
     this.banner.add([saveBtn, saveLabel]);
@@ -1985,12 +2020,14 @@ class CarScene extends Phaser.Scene {
 
       const stored = saveHighScores(updated);
 
-      // Tear the form down before redrawing, or the input floats over the
-      // table it's been replaced by.
+      // Tear the whole form down before redrawing, the heading included -
+      // the table's own heading sits at exactly this height, and leaving
+      // this one behind would print the two over each other.
       this.nameInput.destroy();
       this.nameInput = null;
       saveBtn.destroy();
       saveLabel.destroy();
+      newBest.destroy();
 
       this.showTable(updated, stored ? null : 'Could not save on this browser', entry);
       this.armRestart();
@@ -2002,7 +2039,7 @@ class CarScene extends Phaser.Scene {
      Draw the standings into the card.
      ---------------------------------------------------------------- */
   showTable(scores, warning, justAdded) {
-    let y = -104;
+    let y = -78;
 
     this.banner.add(
       this.add.text(0, y, 'Best scores',
@@ -2044,9 +2081,26 @@ class CarScene extends Phaser.Scene {
     }
 
     this.banner.add(
-      this.add.text(0, 208, 'Tap to play again',
+      this.add.text(0, 248, 'Tap to play again',
                     { ...this.titleStyle, fontSize: '24px' }).setOrigin(0.5)
     );
+  }
+
+
+  /* -------------------------------------------------------------------
+     Pick the parting message for a score.
+
+     Walks the bands in order and takes the first the score fits inside, so
+     the boundaries resolve the way the ranges read: 50 belongs to the first
+     band, not the second. The final band has no ceiling and catches
+     everything above, including a perfect 160.
+     ---------------------------------------------------------------- */
+  encouragementFor(score) {
+    const bands = CONFIG.ENCOURAGEMENTS;
+    for (const band of bands) {
+      if (band.upTo === undefined || score <= band.upTo) return band.text;
+    }
+    return bands[bands.length - 1].text;
   }
 
 
