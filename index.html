@@ -2462,22 +2462,27 @@ class HomeScene extends Phaser.Scene {
     // an open panel.
     const dim = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.75).setInteractive();
 
-    const card = this.add.rectangle(W / 2, H * 0.48, W * 0.88, H * 0.70, 0x101a2e, 0.98)
+    // The card is deliberately generous. Privacy grew to five paragraphs
+    // when the Google Play and adverts lines went in, and on a short screen
+    // the old proportions squeezed it down to 13px with a single pixel to
+    // spare. It never overflowed - the fitting loop saw to that - but 13px
+    // is not a size to ask a parent to read a privacy notice at.
+    const card = this.add.rectangle(W / 2, H * 0.50, W * 0.88, H * 0.78, 0x101a2e, 0.98)
       .setStrokeStyle(5, 0xffd54f, 0.95);
 
-    const heading = this.add.text(W / 2, H * 0.18, title, {
+    const heading = this.add.text(W / 2, H * 0.15, title, {
       fontFamily: CONFIG.BUBBLE_FONT, fontSize: '30px', fontStyle: 'bold',
       color: '#ffd54f', stroke: CONFIG.BUBBLE_STROKE_COLOR, strokeThickness: 6
     }).setOrigin(0.5);
 
-    const closeY = H * 0.77;
+    const closeY = H * 0.83;
 
     // Fit the text to the space rather than trusting a fixed size. The first
     // attempt used 17px everywhere and the copy ran straight down through the
     // Close button - and it would have been worse on a short screen, where
     // there is a fifth less room. Stepping the size down until it measures
     // as fitting is the same trick the word bubbles use.
-    const bodyTop  = H * 0.24;
+    const bodyTop  = H * 0.20;
     const bodyMaxH = (closeY - 34) - bodyTop;   // stop short of the button
 
     const body = this.add.text(W * 0.12, bodyTop, paragraphs.join('\n\n'), {
@@ -2521,10 +2526,15 @@ class HomeScene extends Phaser.Scene {
 
   showPrivacy() {
     this.showPanel('Privacy', [
-      'This game does not collect, store or send any information about you or your child.',
-      'No sign-in, no accounts, no adverts, no tracking of any kind.',
+      // Scoped to "the game itself" on purpose. Once adverts are added, a
+      // blanket "this app collects nothing" would be untrue, but this stays
+      // accurate: what the game does and what a third party does are
+      // genuinely different things, and the lines below say so plainly.
+      'The game itself collects nothing. No sign-in, no account, and no tracking of its own.',
       'Best scores are saved on this device only. Nobody else can see them, and clearing the app\'s data erases them.',
-      'In a browser, the game engine is fetched from a public code library. The installed app bundles everything and makes no internet connection at all.'
+      'This app is distributed through Google Play. Google may collect information about installs and crashes under its own privacy policy, separately from the game.',
+      'Any adverts shown are provided by Google, which may collect information through them under its own privacy policy, independently of the game.',
+      'In a browser, the game engine is fetched from a public code library. The installed app bundles it instead.'
     ]);
   }
 
