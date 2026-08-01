@@ -390,6 +390,13 @@ class SoundKit {
     // method below quietly does nothing and the game still plays fine.
     this.enabled = !!this.ctx;
     this.muted = false;
+
+    // Every oscillator and looping source we start, kept so dispose() can
+    // stop them again. They run continuously and would otherwise outlive the
+    // scene: leave to the menu, press Play, and a second engine would start
+    // up underneath the first, then a third, then a fourth.
+    this.sources = [];
+
     if (!this.enabled) return;
 
     // One volume knob that everything else feeds into, so muting is a
@@ -549,6 +556,7 @@ class SoundKit {
 
     src.start();
     lfo.start();
+    this.sources.push(src, lfo);
   }
 
   /* The engine.
@@ -650,6 +658,32 @@ class SoundKit {
     this.engineChug.start();
     wobble.start();
     grit.start();
+
+    this.sources.push(this.engineOsc1, this.engineOsc2, this.engineOsc3,
+                      this.engineChug, wobble, grit);
+  }
+
+
+  /* Silence everything and let it go.
+
+     Called when the game scene shuts down. Web Audio nodes are not owned by
+     the scene that made them - they keep running, and keep making noise,
+     long after Phaser has torn the scene down. Stopping a source that was
+     never started throws, hence the guard around each one. */
+  dispose() {
+    if (!this.enabled) return;
+
+    this.sources.forEach(node => {
+      try { node.stop(); } catch (err) { /* already stopped, or never started */ }
+      try { node.disconnect(); } catch (err) { /* nothing to disconnect */ }
+    });
+    this.sources = [];
+
+    try { this.master.disconnect(); } catch (err) { /* already detached */ }
+
+    // Guards every method: a disposed kit does nothing rather than throwing
+    // if a stray callback reaches it after the scene has gone.
+    this.enabled = false;
   }
 
   /* How hard the car is being driven: 0 = sitting still, 1 = full tilt.
@@ -1119,6 +1153,18 @@ class CarScene extends Phaser.Scene {
 
     // --- Sound, plus a mute button in the top-right corner ----------
     this.sfx = new SoundKit(this);
+
+    // Whenever this scene goes away - back to the menu, or any other route
+    // out - silence its audio and clear the name box. Phaser tears down its
+    // own display objects, but a Web Audio node and a DOM element are
+    // neither of those and would both outlive the scene that made them.
+    this.events.once('shutdown', () => {
+      this.sfx.dispose();
+      if (this.nameInput) {
+        this.nameInput.destroy();
+        this.nameInput = null;
+      }
+    });
 
     this.muteBtn = this.add.text(W - 18, 20, '🔊', {
       fontFamily: 'Arial, Helvetica, sans-serif',
@@ -1970,7 +2016,6 @@ class CarScene extends Phaser.Scene {
     } else {
       this.showTable(scores, highScoresAvailable()
         ? null : 'This browser will not save scores');
-      this.armRestart();
     }
   }
 
@@ -2030,7 +2075,6 @@ class CarScene extends Phaser.Scene {
       newBest.destroy();
 
       this.showTable(updated, stored ? null : 'Could not save on this browser', entry);
-      this.armRestart();
     });
   }
 
@@ -2080,10 +2124,41 @@ class CarScene extends Phaser.Scene {
       );
     }
 
-    this.banner.add(
-      this.add.text(0, 248, 'Tap to play again',
-                    { ...this.titleStyle, fontSize: '24px' }).setOrigin(0.5)
-    );
+    this.addEndButtons();
+  }
+
+
+  /* -------------------------------------------------------------------
+     Play again, or go back to the menu.
+
+     These replace a "tap anywhere to play again" line. Tapping anywhere and
+     having a button on the same card cannot both work - the tap meant for
+     the button would restart the run underneath it - so the loose tap had
+     to go for the menu button to exist at all.
+     ---------------------------------------------------------------- */
+  addEndButtons() {
+    const label = (extra) => ({ ...this.titleStyle, fontSize: '22px', ...extra });
+
+    const again = this.add.rectangle(-98, 240, 178, 56, 0x4caf50)
+      .setStrokeStyle(4, 0xffffff, 0.95);
+    const againLabel = this.add.text(-98, 240, 'Play Again', label()).setOrigin(0.5);
+
+    const menu = this.add.rectangle(98, 240, 178, 56, 0x4fc3f7)
+      .setStrokeStyle(4, 0xffffff, 0.95);
+    const menuLabel = this.add.text(98, 240, 'Main Menu', label()).setOrigin(0.5);
+
+    this.banner.add([again, againLabel, menu, menuLabel]);
+
+    // Deliberately dead for a moment. A finger still dragging the car as the
+    // card appears would otherwise land on whichever button it happened to
+    // be over, and the run would end up restarted by accident.
+    this.time.delayedCall(600, () => {
+      again.setInteractive({ useHandCursor: true });
+      menu.setInteractive({ useHandCursor: true });
+
+      again.on('pointerdown', () => this.resetRun());
+      menu.on('pointerdown', () => this.scene.start('HomeScene'));
+    });
   }
 
 
@@ -2101,15 +2176,6 @@ class CarScene extends Phaser.Scene {
       if (band.upTo === undefined || score <= band.upTo) return band.text;
     }
     return bands[bands.length - 1].text;
-  }
-
-
-  // Wait a beat before listening for the tap, so a finger still dragging the
-  // car when the card appears doesn't restart it by accident.
-  armRestart() {
-    this.time.delayedCall(800, () => {
-      this.input.once('pointerdown', () => this.resetRun());
-    });
   }
 
 
