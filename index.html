@@ -2533,8 +2533,13 @@ class HomeScene extends Phaser.Scene {
       'The game itself collects nothing. No sign-in, no account, and no tracking of its own.',
       'Best scores are saved on this device only. Nobody else can see them, and clearing the app\'s data erases them.',
       'This app is distributed through Google Play. Google may collect information about installs and crashes under its own privacy policy, separately from the game.',
-      'Any adverts shown are provided by Google, which may collect information through them under its own privacy policy, independently of the game.',
-      'In a browser, the game engine is fetched from a public code library. The installed app bundles it instead.'
+      // Ends here on purpose. There was a line about the game engine being
+      // fetched from a public code library when run in a browser, but anyone
+      // reading this panel is inside the installed app, where the engine is
+      // bundled - so it described a situation the reader is not in, and
+      // diluted the two disclosures that actually matter. That fact belongs
+      // in the hosted web policy, where the reader really is in a browser.
+      'Any adverts shown are provided by Google, which may collect information through them under its own privacy policy, independently of the game.'
     ]);
   }
 
