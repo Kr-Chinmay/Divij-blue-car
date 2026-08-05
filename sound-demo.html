@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mini Driver - music options</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body {
+      margin: 0; padding: 20px 18px 60px;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #16181e; color: #e6e9f0; line-height: 1.55;
+      -webkit-tap-highlight-color: transparent;
+    }
+    h1 { font-size: 21px; margin: 0 0 6px; }
+    p.lead { color: #9aa4b8; margin: 0 0 20px; font-size: 15px; }
+    .card {
+      background: #1e222b; border-radius: 14px;
+      padding: 16px 16px 18px; margin-bottom: 16px;
+      border: 1px solid #2c313d;
+    }
+    .card h2 { font-size: 18px; margin: 0 0 4px; }
+    .card p { font-size: 14px; color: #b9c0cf; margin: 0 0 14px; }
+    button {
+      -webkit-appearance: none; appearance: none; border: none;
+      border-radius: 12px; font-size: 17px; font-weight: bold;
+      color: #fff; padding: 14px 20px; width: 100%;
+      background: #4caf50; cursor: pointer;
+    }
+    button.playing { background: #ff7f6b; }
+    .controls { background: #1e222b; border-radius: 14px; padding: 16px; border: 1px solid #2c313d; }
+    .controls h2 { font-size: 16px; margin: 0 0 12px; }
+    label { display: flex; align-items: center; gap: 10px; font-size: 15px; margin-bottom: 12px; }
+    input[type=checkbox] { width: 22px; height: 22px; accent-color: #4fc3f7; }
+    input[type=range] { width: 100%; accent-color: #ffa726; }
+    .row { display: flex; gap: 10px; }
+    .row button { font-size: 15px; padding: 12px 10px; }
+    .blue { background: #4fc3f7; color: #06263a; }
+    .grey { background: #6c7688; }
+    .hint { font-size: 13px; color: #7e8798; margin-top: 4px; }
+  </style>
+  <script src="music.js"></script>
+</head>
+<body>
+
+<h1>Three music options</h1>
+<p class="lead">
+  Tap one to hear it. The engine and the collect sounds are layered in
+  underneath, so you are judging the mix rather than the tune on its own.
+  Best with the phone off silent.
+</p>
+
+<div class="card">
+  <h2>1. Sunny tune</h2>
+  <p>A written melody over a bass note. The most obviously a tune &mdash; and the
+     one most likely to wear thin, because a loop is a loop.</p>
+  <button data-style="tune">Play</button>
+</div>
+
+<div class="card">
+  <h2>2. Driving groove</h2>
+  <p>Shaker, soft kick and a bouncy bass. The tempo follows the speed slider
+     below, so third gear really would sound faster.</p>
+  <button data-style="groove">Play</button>
+</div>
+
+<div class="card">
+  <h2>3. Endless sparkle</h2>
+  <p>A slow chord pad with bell notes falling at random over it. Never repeats,
+     so it cannot wear out &mdash; but it is less obviously a tune.</p>
+  <button data-style="sparkle">Play</button>
+</div>
+
+<div class="controls">
+  <h2>Mix in</h2>
+  <label><input type="checkbox" id="eng" checked> Engine</label>
+  <label><input type="checkbox" id="pops" checked> Collecting bubbles</label>
+  <label><input type="checkbox" id="bumps" checked> Hitting a grey one</label>
+
+  <h2 style="margin-top:16px">Speed</h2>
+  <input type="range" id="speed" min="0" max="100" value="15">
+  <div class="hint">Drives the engine pitch and, for the groove, the tempo.</div>
+
+  <div class="row" style="margin-top:16px">
+    <button class="blue" id="try3">Hear a +5 catch</button>
+    <button class="grey" id="stop">Stop all</button>
+  </div>
+</div>
+
+<script>
+const M = window.MiniDriverMusic;
+let ctx = null, out = null, limiter = null;
+let current = null, currentStyle = null, eng = null, popTimer = null, bumpTimer = null;
+
+// Nothing may be created before a tap: browsers refuse to start audio
+// without one, and building the context earlier just leaves it suspended.
+function audio() {
+  if (ctx) return ctx;
+  ctx = new (window.AudioContext || window.webkitAudioContext)();
+  out = ctx.createGain();
+  out.gain.value = 0.9;
+  limiter = ctx.createDynamicsCompressor();
+  limiter.threshold.value = -6; limiter.ratio.value = 12;
+  out.connect(limiter); limiter.connect(ctx.destination);
+  return ctx;
+}
+
+function stopAll() {
+  if (current) { current.stop(); current = null; currentStyle = null; }
+  if (eng) { eng.stop(); eng = null; }
+  clearInterval(popTimer); popTimer = null;
+  clearInterval(bumpTimer); bumpTimer = null;
+  document.querySelectorAll('button[data-style]').forEach(b => {
+    b.textContent = 'Play'; b.classList.remove('playing');
+  });
+}
+
+function speed() { return document.getElementById('speed').value / 100; }
+
+function startStyle(style, btn) {
+  audio();
+  const wasPlaying = currentStyle === style;
+  stopAll();
+  if (wasPlaying) return;          // tapping the playing one stops it
+
+  current = M.styles[style](ctx, out);
+  current.setIntensity(speed());
+  current.start();
+  currentStyle = style;
+  btn.textContent = 'Stop';
+  btn.classList.add('playing');
+
+  if (document.getElementById('eng').checked) {
+    eng = M.engine(ctx, out);
+    eng.setLoad(speed());
+  }
+  // Collects arrive at roughly the rate a real run produces them.
+  if (document.getElementById('pops').checked) {
+    popTimer = setInterval(() => {
+      const r = Math.random();
+      M.collect(ctx, out, r > 0.85 ? 5 : r > 0.6 ? 3 : 1);
+    }, 1800);
+  }
+  if (document.getElementById('bumps').checked) {
+    bumpTimer = setInterval(() => M.bump(ctx, out), 7000);
+  }
+}
+
+document.querySelectorAll('button[data-style]').forEach(btn => {
+  btn.addEventListener('click', () => startStyle(btn.dataset.style, btn));
+});
+
+document.getElementById('speed').addEventListener('input', () => {
+  if (current) current.setIntensity(speed());
+  if (eng) eng.setLoad(speed());
+});
+
+document.getElementById('try3').addEventListener('click', () => {
+  audio();
+  M.collect(ctx, out, 5);
+});
+
+document.getElementById('stop').addEventListener('click', stopAll);
+</script>
+
+</body>
+</html>
