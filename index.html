@@ -372,8 +372,18 @@ const CONFIG = {
 
   // The chug rate rises with the revs, exactly as a real engine's firing
   // rate does. Holding it fixed is what made the old one sound lifeless.
-  ENGINE_CHUG_MIN_HZ: 6,
-  ENGINE_CHUG_MAX_HZ: 23,
+  // Both the same on purpose - the chug rate no longer follows the gear.
+  //
+  // It used to run 6Hz to 23Hz, and that turned out to be the real reason the
+  // game sounded like it was accelerating. The chug is an amplitude wobble,
+  // and a wobble under a tone is heard as a BEAT: 6Hz is 360 pulses a minute,
+  // 23Hz is 1380. Removing the music's 50% tempo climb changed little while
+  // this 283% one was still running underneath it.
+  //
+  // Raise the max again for a hint of it, but keep the gap small - the ear
+  // reads even a modest change here as the tempo moving.
+  ENGINE_CHUG_MIN_HZ: 8,
+  ENGINE_CHUG_MAX_HZ: 8,
 };
 
 

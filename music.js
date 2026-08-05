@@ -320,7 +320,10 @@
       o2.frequency.value = hz;
       o3.frequency.value = hz * 2;
       filter.frequency.value = 500 + t * 1400;
-      chug.frequency.value = 6 + t * 17;
+      // Held steady, matching the game. A chug that quickened with the revs
+      // was what made the whole thing seem to accelerate - an amplitude
+      // wobble under a tone is heard as a beat, not as an engine.
+      chug.frequency.value = 8;
       gain.gain.value = 0.07 * (0.75 + 0.5 * t);
     }
     setLoad(0);
