@@ -49,6 +49,10 @@
   <!-- The logo, shared with icon.html so the badge on the home screen and
        the launcher icon are drawn by the same code and cannot drift apart. -->
   <script src="logo.js"></script>
+
+  <!-- The backing music, shared with sound-demo.html so what was chosen
+       there is literally what plays here. -->
+  <script src="music.js"></script>
 </head>
 <body>
   <div id="game"></div>
@@ -346,6 +350,7 @@ const CONFIG = {
   // Every sound here is generated in code with the Web Audio API. There are
   // no .mp3 / .wav files to download, which keeps this a genuine single file.
   MASTER_VOLUME: 0.9,    // overall level, 0..1
+  MUSIC_VOLUME:  0.55,   // the backing groove, under the effects on purpose
   POP_VOLUME:    0.32,   // the "pop" when you collect a bubble
   HUM_VOLUME:    0.03,   // soft background road hum. Set to 0 for silence.
 
@@ -444,45 +449,17 @@ class SoundKit {
   /* The happy coin "pop": two quick notes, the second higher than the
      first. That little upward jump is what makes it sound rewarding
      rather than like an error beep. */
+  /* The catch, in tune with the music.
+
+     This used to be a fixed run of B5 and E6 - pitches that knew nothing
+     about the backing and clashed with it as often as not. It now climbs the
+     same pentatonic scale the groove is built from, so a catch always lands
+     in key whenever it happens to fall. Worth more still means more notes
+     and a higher start, so the sound still tells you what you caught before
+     the number has been read. */
   pop(value = 1) {
     if (!this.enabled || this.muted) return;
-
-    const ctx = this.ctx;
-    const t = ctx.currentTime;
-
-    // An ordinary catch is the two-note pop. A bonus keeps climbing - three
-    // notes for +3, four for +5 - so what you hear tells you how much you
-    // just won without having to read the number.
-    const runs = { 1: [988, 1319], 3: [988, 1319, 1568], 5: [988, 1319, 1568, 2093] };
-    const notes = runs[value] || runs[1];
-    const step  = 0.055;
-
-    const osc  = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    osc.type = 'triangle';   // softer and rounder than a square wave
-
-    // Nudge the pitch a hair each time so a fast streak of collects
-    // doesn't sound like a machine stuck on repeat.
-    osc.detune.value = Phaser.Math.FloatBetween(-15, 15);   // in cents
-
-    notes.forEach((hz, i) => osc.frequency.setValueAtTime(hz, t + i * step));
-
-    // Let the tail run past the last note so the run doesn't sound cut off.
-    const tail = notes.length * step + 0.20;
-
-    // The volume envelope. Ramping up from a whisper instead of starting
-    // at full blast is what avoids the "click" you get from a raw tone.
-    // (Exponential ramps can never reach exactly 0, hence 0.0001.)
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(CONFIG.POP_VOLUME, t + 0.008);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + tail);
-
-    osc.connect(gain);
-    gain.connect(this.master);
-
-    osc.start(t);
-    osc.stop(t + tail + 0.02);   // tidies itself up; no cleanup needed from us
+    window.MiniDriverMusic.collect(this.ctx, this.master, value);
   }
 
   /* The "oops" for hitting one of the bad bubbles.
@@ -491,34 +468,14 @@ class SoundKit {
      brighter note, this slides DOWN to a duller one. That falling shape is
      what our ears read as "no" - and it's kept short and soft so it lands
      as a bump rather than as something to be upset by. */
+  /* The bump. Pitched on F# - the one interval the scale never contains -
+     so against a backing where everything else is consonant it reads
+     instantly as the wrong note. That contrast only works because the catch
+     above is now IN the scale; when both were arbitrary, neither meant
+     anything. */
   thud() {
     if (!this.enabled || this.muted) return;
-
-    const ctx = this.ctx;
-    const t = ctx.currentTime;
-    const osc  = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    // A filter takes the buzz off the sawtooth, leaving something closer to
-    // a wooden knock than an error beep.
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 900;
-
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(300, t);
-    osc.frequency.exponentialRampToValueAtTime(120, t + 0.20);   // slide down
-
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(CONFIG.POP_VOLUME * 0.85, t + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.30);
-
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(this.master);
-
-    osc.start(t);
-    osc.stop(t + 0.32);
+    window.MiniDriverMusic.bump(this.ctx, this.master);
   }
 
   /* A soft, continuous road hum sitting under everything. It's white noise
@@ -732,7 +689,74 @@ class SoundKit {
 
 
 /* ---------------------------------------------------------------------
-   3. HIGH SCORES
+   3. THE MUSIC
+
+   Deliberately NOT owned by a scene, unlike SoundKit.
+
+   The groove has to play across the home screen and the game both, and a
+   scene-owned track would stop dead and restart from the top every time you
+   moved between them - a bar and a half in, every single time. So this is
+   created once, lives on the page, and simply keeps playing while scenes
+   come and go underneath it.
+
+   That also means it must NOT be torn down in the scene shutdown handler
+   that disposes SoundKit. The two have opposite lifetimes on purpose.
+   ------------------------------------------------------------------ */
+const GameMusic = {
+  ctx: null,
+  out: null,
+  kit: null,
+  muted: false,
+
+  /* Borrow Phaser's audio context, the same one SoundKit uses, so the whole
+     game still runs through a single context. */
+  init(scene) {
+    if (this.ctx || !scene.sound || !scene.sound.context) return;
+
+    this.ctx = scene.sound.context;
+    this.out = this.ctx.createGain();
+    this.out.gain.value = CONFIG.MUSIC_VOLUME;
+
+    // Its own limiter. The music is a steady bed and the effects are spikes
+    // on top; sharing one limiter would let a burst of collects duck the
+    // music audibly every time, which sounds like a fault rather than a mix.
+    const limiter = this.ctx.createDynamicsCompressor();
+    limiter.threshold.value = -8;
+    limiter.ratio.value = 8;
+    this.out.connect(limiter);
+    limiter.connect(this.ctx.destination);
+  },
+
+  // Safe to call as often as you like; only the first call does anything.
+  start(scene) {
+    this.init(scene);
+    if (!this.ctx || this.kit) return;
+
+    if (this.ctx.state === 'suspended') this.ctx.resume();
+
+    this.kit = window.MiniDriverMusic.styles.groove(this.ctx, this.out);
+    this.kit.start();
+  },
+
+  // 0 is first gear, 1 is top. Drives the tempo, which is the whole reason
+  // this style was chosen: a higher gear genuinely sounds faster.
+  setIntensity(t) {
+    if (this.kit) this.kit.setIntensity(t);
+  },
+
+  setMuted(muted) {
+    this.muted = muted;
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.out.gain.cancelScheduledValues(t);
+    this.out.gain.setValueAtTime(this.out.gain.value, t);
+    this.out.gain.linearRampToValueAtTime(muted ? 0 : CONFIG.MUSIC_VOLUME, t + 0.15);
+  }
+};
+
+
+/* ---------------------------------------------------------------------
+   4. HIGH SCORES
 
    Saved in the browser's localStorage, which means they live on THIS
    phone in THIS browser. There's no server behind the game, so scores
@@ -1166,7 +1190,12 @@ class CarScene extends Phaser.Scene {
       }
     });
 
-    this.muteBtn = this.add.text(W - 18, 20, '🔊', {
+    // Opens showing whatever was chosen on the menu, rather than always
+    // claiming sound is on - the music setting carries across scenes even
+    // though this button is rebuilt each time the game starts.
+    this.sfx.setMuted(GameMusic.muted);
+
+    this.muteBtn = this.add.text(W - 18, 20, GameMusic.muted ? '🔇' : '🔊', {
       fontFamily: 'Arial, Helvetica, sans-serif',
       fontSize: '32px'
     }).setOrigin(1, 0).setDepth(10);
@@ -1184,8 +1213,11 @@ class CarScene extends Phaser.Scene {
       Phaser.Geom.Rectangle.Contains
     );
 
+    // One button, both busses. Effects and music run through separate
+    // limiters, so muting has to reach each of them.
     this.muteBtn.on('pointerdown', pointer => {
       this.sfx.setMuted(!this.sfx.muted);
+      GameMusic.setMuted(this.sfx.muted);
       this.muteBtn.setText(this.sfx.muted ? '🔇' : '🔊');
 
       // Remember that this particular touch belongs to the button, so the
@@ -1316,6 +1348,11 @@ class CarScene extends Phaser.Scene {
       this.sfx.resume();
       this.sfx.startRoadHum();
       this.sfx.startEngine();
+
+      // Normally already running from the home screen. Harmless to call
+      // again - it only acts the first time - and it covers the case of
+      // arriving here without having tapped anything on the way.
+      GameMusic.start(this);
     });
 
     // How hard the engine is working, smoothed between frames (see update()).
@@ -1507,6 +1544,12 @@ class CarScene extends Phaser.Scene {
     if (previous !== undefined && previous !== this.gear && this.dismissSpeedHint) {
       this.dismissSpeedHint();
     }
+
+    // Push the tempo up with the gear. This is the whole reason the groove
+    // was the style worth having: third gear does not merely run faster, it
+    // sounds faster, so choosing it is a musical decision as well as a
+    // mechanical one.
+    GameMusic.setIntensity((this.gear - 1) / (CONFIG.GEAR_SPEEDS.length - 1));
 
     const y = this.gearDetentY(this.gear);
     this.sliderKnob.setFillStyle(CONFIG.GEAR_COLOURS[this.gear - 1]);
@@ -2550,6 +2593,28 @@ class HomeScene extends Phaser.Scene {
         this.tweens.add({ targets: disc, scale: 1.18, duration: 90, yoyo: true });
         onTap();
       });
+    });
+
+    // --- Music --------------------------------------------------------
+    // Any tap here will do. It cannot start before one: browsers refuse
+    // audio until the user has interacted, which is why the app is silent
+    // for the moment between opening the link and the first touch.
+    this.input.once('pointerdown', () => GameMusic.start(this));
+
+    // The menu needs its own mute. The one in the game is no use to a parent
+    // standing on this screen with the groove already playing.
+    const speaker = this.add.text(W - 18, 18, GameMusic.muted ? '🔇' : '🔊', {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '30px'
+    }).setOrigin(1, 0).setDepth(12);
+
+    speaker.setInteractive(
+      new Phaser.Geom.Rectangle(-22, -12, speaker.width + 44, speaker.height + 24),
+      Phaser.Geom.Rectangle.Contains
+    );
+
+    speaker.on('pointerdown', () => {
+      GameMusic.setMuted(!GameMusic.muted);
+      speaker.setText(GameMusic.muted ? '🔇' : '🔊');
     });
 
     // --- Best score so far, if there is one -------------------------
