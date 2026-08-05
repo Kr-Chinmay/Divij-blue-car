@@ -1245,6 +1245,33 @@ class CarScene extends Phaser.Scene {
       }
     });
 
+    // --- Pause ------------------------------------------------------
+    // Sits in the only free space along the top. The score chip reaches
+    // x=314 at its widest ("Score: 200") and the mute chip begins at 364,
+    // leaving fifty pixels between them - so this is 44 across with three
+    // pixels either side. Snug, but the rest of the row is spoken for.
+    this.paused = false;
+
+    const pauseX = 339, pauseY = 40;
+
+    this.pauseBtn = this.add.circle(pauseX, pauseY, 22, 0xffa726)
+      .setStrokeStyle(4, 0xffffff, 0.95)
+      .setDepth(10)
+      .setInteractive({ useHandCursor: true });
+
+    // Two bars drawn as shapes rather than an emoji or a glyph, for the same
+    // reason as the speed arrows: no dependence on the phone's fonts.
+    this.add.rectangle(pauseX - 5, pauseY, 5, 18, 0xffffff).setDepth(11);
+    this.add.rectangle(pauseX + 5, pauseY, 5, 18, 0xffffff).setDepth(11);
+
+    this.pauseBtn.on('pointerdown', pointer => {
+      // Steering is drag-anywhere, so without this a finger landing here
+      // would pause AND fling the car up to the corner on the way.
+      this.buttonGesture = true;
+      this.buttonPointerId = pointer.id;
+      this.pauseGame();
+    });
+
     // --- Throttle slider (left edge) --------------------------------
     // Two fingers have to work at once here - one on the knob, one steering -
     // so Phaser needs to track more than its default single touch point.
@@ -2222,6 +2249,81 @@ class CarScene extends Phaser.Scene {
 
 
   /* -------------------------------------------------------------------
+     Freeze the run.
+
+     Not Phaser's own scene.pause(), which stops the scene's input along
+     with everything else - the Resume button would be dead on arrival. A
+     flag of our own stops the world while leaving the overlay tappable.
+     ---------------------------------------------------------------- */
+  pauseGame() {
+    if (this.paused || this.finished) return;
+    this.paused = true;
+
+    this.physics.pause();        // bubbles stop falling
+    this.time.paused = true;     // spawns and the scenery timers stop
+    this.tweens.pauseAll();      // and nothing finishes an animation mid-freeze
+
+    // Drop the engine to idle. Left alone it would hold whatever note it
+    // was revving at, droning under a stationary picture.
+    this.sfx.setEngineLoad(0);
+
+    const W = this.scale.width;
+    const H = this.scale.height;
+
+    this.pauseCard = this.add.container(W / 2, H * 0.44).setDepth(30);
+
+    // Interactive so it swallows every tap meant for the game underneath.
+    const dim = this.add.rectangle(0, 0, W * 2, H * 2, 0x000000, 0.72).setInteractive();
+
+    const card = this.add.rectangle(0, 0, W * 0.82, 300, 0x101a2e, 0.97)
+      .setStrokeStyle(5, 0xffd54f, 0.95);
+
+    const label = (size, extra) => ({
+      fontFamily: CONFIG.BUBBLE_FONT, fontStyle: 'bold', fontSize: size + 'px',
+      color: '#ffffff', stroke: CONFIG.BUBBLE_STROKE_COLOR, strokeThickness: 6,
+      ...extra
+    });
+
+    const title = this.add.text(0, -104, 'Paused', label(38, { color: '#ffd54f' })).setOrigin(0.5);
+
+    const resume = this.add.rectangle(0, -18, 230, 66, 0x4caf50)
+      .setStrokeStyle(4, 0xffffff, 0.95).setInteractive({ useHandCursor: true });
+    const resumeLabel = this.add.text(0, -18, 'Resume', label(28)).setOrigin(0.5);
+
+    const menu = this.add.rectangle(0, 72, 230, 60, 0x4fc3f7)
+      .setStrokeStyle(4, 0xffffff, 0.95).setInteractive({ useHandCursor: true });
+    const menuLabel = this.add.text(0, 72, 'Main Menu', label(26)).setOrigin(0.5);
+
+    resume.on('pointerdown', () => this.resumeGame());
+
+    menu.on('pointerdown', () => {
+      // Unfreeze the clock and the tweens before leaving. The scene is about
+      // to be torn down and rebuilt, but leaving a paused clock behind is the
+      // kind of thing that comes back as a mystery later.
+      this.time.paused = false;
+      this.tweens.resumeAll();
+      this.scene.start('HomeScene');
+    });
+
+    this.pauseCard.add([dim, card, title, resume, resumeLabel, menu, menuLabel]);
+  }
+
+  resumeGame() {
+    if (!this.paused) return;
+    this.paused = false;
+
+    if (this.pauseCard) {
+      this.pauseCard.destroy();
+      this.pauseCard = null;
+    }
+
+    this.physics.resume();
+    this.time.paused = false;
+    this.tweens.resumeAll();
+  }
+
+
+  /* -------------------------------------------------------------------
      Pick the parting message for a score.
 
      Walks the bands in order and takes the first the score fits inside, so
@@ -2276,6 +2378,12 @@ class CarScene extends Phaser.Scene {
      `delta` is milliseconds since the previous frame.
      ---------------------------------------------------------------- */
   update(time, delta) {
+    // Everything below drives the world: steering, scrolling, spawning,
+    // the engine note. Stopping here is what actually makes pause a pause -
+    // physics and the clock are frozen too, but this is the loop that would
+    // otherwise keep the car chasing a finger across a still picture.
+    if (this.paused) return;
+
     const H = this.scale.height;
 
     const W = this.scale.width;
