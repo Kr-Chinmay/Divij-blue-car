@@ -1252,6 +1252,12 @@ class CarScene extends Phaser.Scene {
     // pixels either side. Snug, but the rest of the row is spoken for.
     this.paused = false;
 
+    // Cleared explicitly. Phaser reuses the scene instance across restarts,
+    // so leaving to the menu mid-pause and coming back would otherwise leave
+    // this pointing at an overlay that no longer exists - harmless today,
+    // but exactly the sort of stale handle that misleads a later check.
+    this.pauseCard = null;
+
     const pauseX = 339, pauseY = 40;
 
     this.pauseBtn = this.add.circle(pauseX, pauseY, 22, 0xffa726)
