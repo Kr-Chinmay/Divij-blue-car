@@ -1,0 +1,19 @@
+# Assembled by build-www.ps1 from files already in the repo, so there is
+# nothing here that could not be regenerated in a second.
+www/
+
+# Node, once Capacitor is installed.
+node_modules/
+
+# Android build output. The android/ project itself IS committed - it
+# carries the manifest, the icons and the signing config - but nothing
+# Gradle produces from it needs to be.
+android/build/
+android/app/build/
+android/.gradle/
+android/local.properties
+
+# Signing keys must never be committed. Losing one means never being able
+# to update the app again, so they belong in a password manager, not here.
+*.keystore
+*.jks

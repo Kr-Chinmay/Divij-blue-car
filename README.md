@@ -83,8 +83,10 @@ seconds in gear 3.
 Just open `index.html` in a browser — double-click the file, or drag it into a
 browser window. There's no build step and nothing to install.
 
-Phaser 3 is loaded from a CDN, so the **first** load needs an internet
-connection. After that the browser usually caches it.
+It works with no internet connection at all. Phaser sits next to the game as
+`phaser.min.js` rather than being fetched from a CDN — worth the 1.13MB in the
+repo, because a game played in cars that can't start without a signal isn't
+much of a game, and because it means nothing the app does reaches the network.
 
 ### Playing it on a phone
 
@@ -206,6 +208,26 @@ Open `icon.html` in a browser to save the icon files. It offers:
 Sharing one file between the game and the icon builder is the reason the
 project is no longer a single `index.html`. It's a deliberate trade: an icon
 that silently drifts away from the car in the game would be worse.
+
+## Packaging it as an Android app
+
+Planned identity: **Mini Driver, Mega Values**, package `com.krchinmay.minidriver`.
+The package name is permanent once published and can never be changed.
+
+`build-www.ps1` gathers the files that actually ship into `www/` — the game,
+Phaser, the two shared scripts and the manifest, about 1.26MB in total. That
+folder is what Capacitor copies into the Android project.
+
+It exists because Capacitor copies its web directory wholesale: pointing it at
+the repo root would sweep in the README, both dev pages and the entire `.git`
+directory. Moving the game into `docs/` would have solved that too, but Pages
+would then need its source changed in the repo settings and the live link
+would 404 until that happened — a poor trade for tidiness, given that link is
+how the game gets tested. So the game stays at the root, Pages is untouched,
+and the script picks out what ships.
+
+`www/` is gitignored: everything in it is copied from files already tracked
+here, so it can be rebuilt in a second.
 
 ## How it's built
 

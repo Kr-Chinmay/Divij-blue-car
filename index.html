@@ -14,6 +14,10 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="theme-color" content="#35383f" />
 
+  <!-- Lets a phone add this to the home screen and open it full-screen in
+       portrait, without any of the Android packaging. -->
+  <link rel="manifest" href="manifest.json" />
+
   <style>
     html, body {
       margin: 0;
@@ -43,8 +47,12 @@
     }
   </style>
 
-  <!-- Phaser 3 straight from a CDN. No build step, no npm, no local files. -->
-  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+  <!-- Phaser 3, kept alongside the game rather than fetched from a CDN.
+       Two reasons. The game is played in cars, and a version that cannot
+       start without a signal is a poor one. And it is the last outside
+       connection the app makes, so bundling it is what lets the privacy
+       panel say plainly that nothing leaves the phone. -->
+  <script src="phaser.min.js"></script>
 
   <!-- The logo, shared with icon.html so the badge on the home screen and
        the launcher icon are drawn by the same code and cannot drift apart. -->
