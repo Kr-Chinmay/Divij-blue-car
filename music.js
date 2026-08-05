@@ -263,16 +263,21 @@
     }
   }
 
-  /* The bump, deliberately NOT in the scale. Everything else is consonant,
-     so a note from outside it is instantly recognisable as "that was the
-     wrong one" - which is precisely the job. */
+  /* The bump, deliberately NOT in the scale.
+
+     It started life on 196Hz, which is G - a note sitting squarely INSIDE C
+     major pentatonic, so the "wrong note" was in perfect tune with the music
+     and the whole point was lost. It now opens on F#, a semitone off the G
+     above it and the one interval C major pentatonic never contains. Against
+     a backing where everything else is consonant, that reads instantly as
+     "not that one", which is exactly the job. */
   function bump(ctx, out) {
     var osc = ctx.createOscillator();
     var gain = ctx.createGain();
     var t = ctx.currentTime;
     osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(196, t);
-    osc.frequency.exponentialRampToValueAtTime(92, t + 0.22);
+    osc.frequency.setValueAtTime(185.0, t);              // F#3
+    osc.frequency.exponentialRampToValueAtTime(92.5, t + 0.22);   // F#2
     gain.gain.setValueAtTime(0.30, t);
     gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.30);
     var lp = ctx.createBiquadFilter();
