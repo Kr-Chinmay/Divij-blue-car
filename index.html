@@ -1545,11 +1545,17 @@ class CarScene extends Phaser.Scene {
       this.dismissSpeedHint();
     }
 
-    // Push the tempo up with the gear. This is the whole reason the groove
-    // was the style worth having: third gear does not merely run faster, it
-    // sounds faster, so choosing it is a musical decision as well as a
-    // mechanical one.
-    GameMusic.setIntensity((this.gear - 1) / (CONFIG.GEAR_SPEEDS.length - 1));
+    // The gear deliberately does NOT touch the music.
+    //
+    // It used to: the tempo rose from 125 to 188 BPM across the three gears,
+    // which was the reason this style was picked. In practice it made the
+    // hard gear harder in two ways at once - less time to read a word, and
+    // more urgent music while you tried - so it read as pressure rather than
+    // as reward. The music now holds one steady tempo whatever the gear.
+    //
+    // The selector does not lose its voice for it: the engine still rises in
+    // pitch and brightness, which is where that feedback belongs. An engine
+    // revving is expected. A soundtrack accelerating is stressful.
 
     const y = this.gearDetentY(this.gear);
     this.sliderKnob.setFillStyle(CONFIG.GEAR_COLOURS[this.gear - 1]);
