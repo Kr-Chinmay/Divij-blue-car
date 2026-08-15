@@ -16,5 +16,8 @@
     "@capacitor/cli": "^8.5.0",
     "@capacitor/core": "^8.5.0",
     "@capacitor/keyboard": "^8.0.5"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5"
   }
 }
