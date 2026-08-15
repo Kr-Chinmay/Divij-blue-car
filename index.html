@@ -514,6 +514,8 @@ class SoundKit {
     filter.Q.value = 0.7;
 
     const gain = ctx.createGain();
+    // Kept, so the run ending can fade the road out along with the engine.
+    this.humGain = gain;
     gain.gain.value = CONFIG.HUM_VOLUME;
 
     // A very slow wobble on the filter (about one cycle every 11 seconds)
@@ -669,6 +671,11 @@ class SoundKit {
   setEngineLoad(load) {
     if (!this.enabled || !this.engineStarted) return;
 
+    // Stopped at the end of a run. update() keeps ticking behind the results
+    // card, and without this the next frame would write the engine's volume
+    // straight back up and undo the fade.
+    if (this.driving === false) return;
+
     const l = Phaser.Math.Clamp(load, 0, 1);
 
     const hz = CONFIG.ENGINE_BASE_HZ + l * CONFIG.ENGINE_REV_HZ;
@@ -691,6 +698,37 @@ class SoundKit {
     // chug's depth, or the wobble would swing the gain negative and the
     // engine would audibly tear.
     this.engineGain.gain.value = CONFIG.ENGINE_VOLUME * (0.75 + 0.5 * l);
+  }
+
+  /* Bring the car to a stop, or set it going again.
+
+     Only the driving sounds - the engine and the tyre noise. The music is a
+     separate bus and carries on, which is what you want on a results screen:
+     the car has stopped, so it should fall quiet, but the moment should
+     still feel like part of the game rather than a sudden silence.
+
+     Ramped rather than switched. Cutting a running oscillator to zero
+     produces an audible click, and half a second reads as a car rolling to
+     a halt instead of an engine being unplugged. */
+  setDriving(on, seconds = 0.5) {
+    if (!this.enabled) return;
+
+    const t = this.ctx.currentTime;
+
+    const ramp = (node, target) => {
+      if (!node) return;
+      node.gain.cancelScheduledValues(t);
+      node.gain.setValueAtTime(node.gain.value, t);
+      node.gain.linearRampToValueAtTime(target, t + seconds);
+    };
+
+    // Back to the same resting levels setEngineLoad and startRoadHum use.
+    ramp(this.engineGain, on ? CONFIG.ENGINE_VOLUME * 0.75 : 0);
+    ramp(this.humGain, on ? CONFIG.HUM_VOLUME : 0);
+
+    // While stopped, keep setEngineLoad from writing the gain straight back
+    // up on the next frame - update() is still running behind the card.
+    this.driving = on;
   }
 
   // Fade to silence rather than cutting instantly - an abrupt jump to zero
@@ -2204,6 +2242,11 @@ class CarScene extends Phaser.Scene {
     const W = this.scale.width;
     const H = this.scale.height;
 
+    // The car has finished its run, so let the engine and the road noise
+    // fall quiet. The music carries on - this is a results screen, not an
+    // ending, and total silence would read as something having gone wrong.
+    this.sfx.setDriving(false);
+
     this.banner = this.add.container(W / 2, H * 0.46).setDepth(20);
 
     const panel = this.add.rectangle(0, 0, W * 0.90, 560, 0x101a2e, 0.96);
@@ -2563,6 +2606,9 @@ class CarScene extends Phaser.Scene {
       this.nameEntry.destroy();
       this.nameEntry = null;
     }
+
+    // Start the engine again, having quietened it for the results card.
+    this.sfx.setDriving(true);
 
     this.score = 0;
     this.scoreText.setText('Score: 0');
@@ -2937,6 +2983,17 @@ class HomeScene extends Phaser.Scene {
     // the listener that exists to catch the FIRST touch was being armed one
     // touch too late, and could only ever catch the second.
     GameMusic.init(this);
+
+    // Then try immediately, without waiting to be touched.
+    //
+    // In the installed app this succeeds: MainActivity tells the web view
+    // that sound may play without a gesture, so the music is already going
+    // by the time the home screen is looked at.
+    //
+    // On the web it will be refused, because browsers block audio until the
+    // user interacts and no amount of code changes that. There the attempt
+    // costs nothing and the listener below picks it up on the first tap.
+    GameMusic.start(this);
 
     // Belt and braces. Phaser's own pointer event tries as well, and start()
     // is safe to call as often as you like.
