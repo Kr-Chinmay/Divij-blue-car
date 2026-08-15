@@ -725,6 +725,7 @@ const GameMusic = {
   out: null,
   kit: null,
   muted: false,
+  unlockArmed: false,
 
   /* Borrow Phaser's audio context, the same one SoundKit uses, so the whole
      game still runs through a single context. */
@@ -743,6 +744,58 @@ const GameMusic = {
     limiter.ratio.value = 8;
     this.out.connect(limiter);
     limiter.connect(this.ctx.destination);
+
+    this.armUnlock();
+  },
+
+  /* Catch the first real touch, at the DOM level.
+
+     Phaser does not dispatch its pointer events as they arrive - it queues
+     them and fires them from inside its own game loop. By then the browser
+     no longer considers itself inside a user gesture, and resuming audio is
+     refused. That is why the music sometimes never started until the mute
+     button had been prodded once or twice: those extra taps were doing
+     nothing except giving Phaser's own unlock handler another chance.
+
+     Listening on the document, in the capture phase, puts us inside the
+     actual touch where the browser will allow it. */
+  armUnlock() {
+    if (this.unlockArmed) return;
+    this.unlockArmed = true;
+
+    const events = ['pointerdown', 'touchend', 'click'];
+
+    const attempt = () => {
+      if (!this.ctx) return;
+
+      const done = () => {
+        this.begin();
+        if (this.ctx.state === 'running') {
+          events.forEach(e => document.removeEventListener(e, attempt, true));
+        }
+      };
+
+      if (this.ctx.state === 'running') { done(); return; }
+      this.ctx.resume().then(done).catch(() => { /* try again next touch */ });
+    };
+
+    events.forEach(e => document.addEventListener(e, attempt, true));
+  },
+
+  /* Build the groove, but only once the clock is genuinely running.
+
+     Starting it against a suspended context was the actual bug: currentTime
+     is frozen while suspended, so the scheduler placed every note against a
+     time that never arrived - and because `kit` had been set regardless,
+     nothing ever tried again. */
+  begin() {
+    if (!this.ctx || this.kit || this.ctx.state !== 'running') return;
+
+    this.kit = window.MiniDriverMusic.styles.groove(this.ctx, this.out);
+    this.kit.start();
+
+    // Honour a mute chosen before there was anything to mute.
+    if (this.muted) this.setMuted(true);
   },
 
   // Safe to call as often as you like; only the first call does anything.
@@ -750,10 +803,11 @@ const GameMusic = {
     this.init(scene);
     if (!this.ctx || this.kit) return;
 
-    if (this.ctx.state === 'suspended') this.ctx.resume();
-
-    this.kit = window.MiniDriverMusic.styles.groove(this.ctx, this.out);
-    this.kit.start();
+    if (this.ctx.state === 'running') { this.begin(); return; }
+    this.ctx.resume().then(() => this.begin()).catch(() => {
+      // Refused because the gesture had already ended. The document-level
+      // listener above will get it on the next touch.
+    });
   },
 
   // 0 is first gear, 1 is top. Drives the tempo, which is the whole reason
@@ -831,6 +885,19 @@ const Native = {
       // needs no Exit button of its own.
       App.exitApp();
     });
+  },
+
+  /* Tell me when the on-screen keyboard opens and closes, and how tall it
+     is. Only exists in the app; in a browser the callbacks never fire and
+     the caller carries on unaffected. */
+  onKeyboard(onShow, onHide) {
+    const K = window.Capacitor
+           && window.Capacitor.Plugins
+           && window.Capacitor.Plugins.Keyboard;
+    if (!K) return;
+
+    K.addListener('keyboardWillShow', info => onShow(info.keyboardHeight || 0));
+    K.addListener('keyboardWillHide', () => onHide());
   },
 
   async keepAwake(on) {
@@ -2238,6 +2305,46 @@ class CarScene extends Phaser.Scene {
       { ...this.titleStyle, fontSize: '28px' }).setOrigin(0.5);
 
     this.banner.add([saveBtn, saveLabel]);
+
+    /* Keep the card clear of the keyboard.
+
+       Two things go wrong otherwise. Android normally SHRINKS the web view
+       when the keyboard opens, which makes Phaser rescale the whole canvas
+       and drags the name box away from the card it belongs to - that is the
+       displacement seen on the phone. capacitor.config.json now sets the
+       keyboard to overlay instead of resize, which stops the rescaling.
+
+       That leaves the simpler problem of the keyboard covering the lower
+       part of the screen, so the card slides up by however much it needs to
+       and slides back afterwards. Measuring the keyboard rather than
+       assuming a height matters: they vary a lot between phones, and by
+       whether the suggestion strip is showing. */
+    Native.onKeyboard(
+      keyboardCssPx => {
+        if (!this.banner || this.bannerRestY !== undefined) return;
+
+        // The canvas is scaled to fit the screen, so a height in CSS pixels
+        // is not a height in game pixels.
+        const gamePerCss = this.scale.height / (window.innerHeight || this.scale.height);
+        const covered = keyboardCssPx * gamePerCss;
+
+        const saveBottom = this.banner.y + 42 + 30;
+        const clearLine = this.scale.height - covered - 14;
+        const lift = saveBottom - clearLine;
+        if (lift <= 0) return;
+
+        this.bannerRestY = this.banner.y;
+        this.banner.y -= lift;
+        if (this.nameInput) this.nameInput.y -= lift;
+      },
+      () => {
+        if (this.bannerRestY === undefined) return;
+        const lift = this.bannerRestY - this.banner.y;
+        this.banner.y = this.bannerRestY;
+        if (this.nameInput) this.nameInput.y += lift;
+        this.bannerRestY = undefined;
+      }
+    );
 
     saveBtn.on('pointerdown', () => {
       const el = this.nameInput.node.querySelector('input');

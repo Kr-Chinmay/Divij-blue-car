@@ -1,5 +1,10 @@
 {
   "appId": "com.krchinmay.minidriver",
   "appName": "Mini Driver, Mega Values",
-  "webDir": "www"
+  "webDir": "www",
+  "plugins": {
+    "Keyboard": {
+      "resize": "none"
+    }
+  }
 }
