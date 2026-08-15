@@ -422,6 +422,19 @@ class SoundKit {
 
     if (!this.enabled) return;
 
+    // A bus carrying just the driving sounds - the engine and the tyre
+    // noise - on their way to the master, so both can be silenced at the end
+    // of a run with one ramp, downstream of everything that modulates them.
+    //
+    // That last part is the whole point. The first attempt silenced the
+    // engine by ramping its own gain to zero, which did not work: the chug
+    // oscillator is wired INTO that gain as a signal, and a Web Audio
+    // parameter's value is its own setting PLUS whatever is connected to it.
+    // So the gain went on swinging either side of zero and the engine went on
+    // pulsing quietly - sometimes noticeable, sometimes buried under the
+    // music, which is exactly the "sometimes" that was reported.
+    this.drivingBus = this.ctx.createGain();
+
     // One volume knob that everything else feeds into, so muting is a
     // single change rather than chasing down each sound individually.
     this.master = this.ctx.createGain();
@@ -438,6 +451,7 @@ class SoundKit {
     limiter.attack.value = 0.003;
     limiter.release.value = 0.15;
 
+    this.drivingBus.connect(this.master);
     this.master.connect(limiter);
     limiter.connect(this.ctx.destination);
   }
@@ -529,7 +543,7 @@ class SoundKit {
 
     src.connect(filter);
     filter.connect(gain);
-    gain.connect(this.master);
+    gain.connect(this.drivingBus);   // stops with the engine at the end of a run
 
     src.start();
     lfo.start();
@@ -625,7 +639,7 @@ class SoundKit {
 
     mix.connect(this.engineFilter);
     this.engineFilter.connect(this.engineGain);
-    this.engineGain.connect(this.master);
+    this.engineGain.connect(this.drivingBus);
 
     this.setEngineLoad(0);   // start it idling
 
@@ -671,10 +685,8 @@ class SoundKit {
   setEngineLoad(load) {
     if (!this.enabled || !this.engineStarted) return;
 
-    // Stopped at the end of a run. update() keeps ticking behind the results
-    // card, and without this the next frame would write the engine's volume
-    // straight back up and undo the fade.
-    if (this.driving === false) return;
+    // No guard needed for the results card any more: the driving bus is what
+    // gets silenced there, and it sits downstream of everything written here.
 
     const l = Phaser.Math.Clamp(load, 0, 1);
 
@@ -713,21 +725,17 @@ class SoundKit {
   setDriving(on, seconds = 0.5) {
     if (!this.enabled) return;
 
+    // One ramp, on the bus both driving sounds share. Because nothing is
+    // wired into THIS gain as a signal, taking it to zero is genuinely zero
+    // - unlike ramping the engine's own gain, which the chug oscillator goes
+    // on adding to regardless.
     const t = this.ctx.currentTime;
+    const g = this.drivingBus.gain;
 
-    const ramp = (node, target) => {
-      if (!node) return;
-      node.gain.cancelScheduledValues(t);
-      node.gain.setValueAtTime(node.gain.value, t);
-      node.gain.linearRampToValueAtTime(target, t + seconds);
-    };
+    g.cancelScheduledValues(t);
+    g.setValueAtTime(g.value, t);
+    g.linearRampToValueAtTime(on ? 1 : 0, t + seconds);
 
-    // Back to the same resting levels setEngineLoad and startRoadHum use.
-    ramp(this.engineGain, on ? CONFIG.ENGINE_VOLUME * 0.75 : 0);
-    ramp(this.humGain, on ? CONFIG.HUM_VOLUME : 0);
-
-    // While stopped, keep setEngineLoad from writing the gain straight back
-    // up on the next frame - update() is still running behind the card.
     this.driving = on;
   }
 
