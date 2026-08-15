@@ -774,7 +774,86 @@ const GameMusic = {
 
 
 /* ---------------------------------------------------------------------
-   4. HIGH SCORES
+   4. THE PHONE
+
+   Everything here is about being an installed app rather than a web page:
+   the hardware back button, and stopping the screen dimming mid-game.
+
+   All of it feature-detects. Run in a browser and every method quietly
+   does nothing, so the same file works both ways with no branching at
+   the call sites.
+   ------------------------------------------------------------------ */
+const Native = {
+  wakeLock: null,
+  wantsAwake: false,
+
+  isApp() {
+    const c = window.Capacitor;
+    return !!(c && c.isNativePlatform && c.isNativePlatform());
+  },
+
+  init(game) {
+    // The screen wake lock is worth having in a browser too, so it is set
+    // up regardless. Only the back button is app-only.
+    document.addEventListener('visibilitychange', () => {
+      // Android drops a wake lock whenever the page is hidden - a call, a
+      // notification, switching apps - and does not hand it back. Without
+      // this the screen would start dimming again after the first
+      // interruption, which is exactly when nobody would think to look.
+      if (document.visibilityState === 'visible' && this.wantsAwake) {
+        this.keepAwake(true);
+      }
+    });
+
+    if (!this.isApp()) return;
+
+    const App = window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+    if (!App) return;
+
+    App.addListener('backButton', () => {
+      const car = game.scene.keys.CarScene;
+
+      if (car && car.sys.isActive()) {
+        // Mid-run, back pauses. Already paused, it leaves. Two presses to
+        // get out of a game is the right number: one is too easy to do by
+        // accident with a run in progress.
+        if (car.paused) {
+          car.resumeGame();
+          car.scene.start('HomeScene');
+        } else {
+          car.pauseGame();
+        }
+        return;
+      }
+
+      // From the home screen, back leaves the app - which is what the
+      // gesture is expected to do from a top-level screen, and why the app
+      // needs no Exit button of its own.
+      App.exitApp();
+    });
+  },
+
+  async keepAwake(on) {
+    this.wantsAwake = on;
+    try {
+      if (on) {
+        if (!('wakeLock' in navigator) || this.wakeLock) return;
+        this.wakeLock = await navigator.wakeLock.request('screen');
+        this.wakeLock.addEventListener('release', () => { this.wakeLock = null; });
+      } else if (this.wakeLock) {
+        await this.wakeLock.release();
+        this.wakeLock = null;
+      }
+    } catch (err) {
+      // Unsupported, or refused because the page was not visible at the
+      // time. A dimming screen is not worth interrupting a game over.
+    }
+  }
+};
+
+
+/* ---------------------------------------------------------------------
+   5. HIGH SCORES
 
    Saved in the browser's localStorage, which means they live on THIS
    phone in THIS browser. There's no server behind the game, so scores
@@ -1200,8 +1279,14 @@ class CarScene extends Phaser.Scene {
     // out - silence its audio and clear the name box. Phaser tears down its
     // own display objects, but a Web Audio node and a DOM element are
     // neither of those and would both outlive the scene that made them.
+    // Hold the screen awake while a run is on. Steering is a long drag with
+    // no taps in it, which Android reads as no interaction at all - so
+    // without this the screen dims on a child who is very much still playing.
+    Native.keepAwake(true);
+
     this.events.once('shutdown', () => {
       this.sfx.dispose();
+      Native.keepAwake(false);
       if (this.nameInput) {
         this.nameInput.destroy();
         this.nameInput = null;
@@ -2972,6 +3057,9 @@ const game = new Phaser.Game({
 // Handy when you're tinkering: open the browser console and you can reach
 // the live game, e.g.  game.scene.keys.CarScene.score
 window.game = game;
+
+// Hardware back button and the screen wake lock. No-ops in a browser.
+Native.init(game);
 </script>
 </body>
 </html>

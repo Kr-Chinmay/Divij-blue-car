@@ -1,0 +1,15 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <!-- app_name is the label under the launcher icon, where Android gives
+         you about twelve characters before truncating. The full title
+         "Mini Driver, Mega Values" would show as "Mini Driver,..." with the
+         better half cut off, so the icon gets the short form.
+
+         The full name still appears everywhere it has room: the Play Store
+         listing (set in the Console, not here) and the game's own home
+         screen. -->
+    <string name="app_name">Mini Driver</string>
+    <string name="title_activity_main">Mini Driver</string>
+    <string name="package_name">com.krchinmay.minidriver</string>
+    <string name="custom_url_scheme">com.krchinmay.minidriver</string>
+</resources>

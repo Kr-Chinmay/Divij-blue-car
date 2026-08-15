@@ -1,0 +1,19 @@
+{
+  "name": "mini-driver-mega-values",
+  "version": "1.0.0",
+  "description": "Catch the kind words, dodge the unkind ones. A gentle driving game for young children.",
+  "private": true,
+  "scripts": {
+    "build": "powershell -ExecutionPolicy Bypass -File ./build-www.ps1",
+    "sync": "npm run build && cap sync android",
+    "open": "cap open android"
+  },
+  "author": "Kr-Chinmay",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/core": "^8.5.0"
+  }
+}
