@@ -887,19 +887,6 @@ const Native = {
     });
   },
 
-  /* Tell me when the on-screen keyboard opens and closes, and how tall it
-     is. Only exists in the app; in a browser the callbacks never fire and
-     the caller carries on unaffected. */
-  onKeyboard(onShow, onHide) {
-    const K = window.Capacitor
-           && window.Capacitor.Plugins
-           && window.Capacitor.Plugins.Keyboard;
-    if (!K) return;
-
-    K.addListener('keyboardWillShow', info => onShow(info.keyboardHeight || 0));
-    K.addListener('keyboardWillHide', () => onHide());
-  },
-
   async keepAwake(on) {
     this.wantsAwake = on;
     try {
@@ -1354,10 +1341,6 @@ class CarScene extends Phaser.Scene {
     this.events.once('shutdown', () => {
       this.sfx.dispose();
       Native.keepAwake(false);
-      if (this.nameInput) {
-        this.nameInput.destroy();
-        this.nameInput = null;
-      }
     });
 
     // Opens showing whatever was chosen on the menu, rather than always
@@ -2281,93 +2264,110 @@ class CarScene extends Phaser.Scene {
      coordinates, so it stays put however the canvas is scaled.
      ---------------------------------------------------------------- */
   showNameEntry(scores) {
-    // Held onto rather than dropped into the container and forgotten: the
-    // table that replaces this form puts its own heading at the same height,
-    // so this one has to be cleared away or the two draw on top of each other.
-    const newBest = this.add.text(0, -78, 'New high score!',
-      { ...this.titleStyle, fontSize: '24px', color: '#ffd54f' }).setOrigin(0.5);
-    this.banner.add(newBest);
+    const W = this.scale.width;
+    const H = this.scale.height;
 
-    const bannerY = this.banner.y;
+    let typed = '';
 
-    this.nameInput = this.add.dom(this.banner.x, bannerY - 32).createFromHTML(
-      '<input type="text" maxlength="' + CONFIG.NAME_MAX_LEN + '" placeholder="Your name" ' +
-      'style="width:210px;height:44px;font-size:22px;text-align:center;' +
-      'border-radius:10px;border:3px solid #ffd54f;background:#f6f8ff;color:#101828;' +
-      'font-family:Arial,Helvetica,sans-serif;outline:none;">'
-    ).setDepth(21);
+    this.nameEntry = this.add.container(0, 0).setDepth(40);
 
-    const saveBtn = this.add.rectangle(0, 42, 200, 52, 0x4caf50)
-      .setStrokeStyle(4, 0xffffff, 0.9)
-      .setInteractive({ useHandCursor: true });
+    const dim = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.86).setInteractive();
+    const panel = this.add.rectangle(W / 2, H * 0.505, W * 0.94, H * 0.89, 0x101a2e, 0.98)
+      .setStrokeStyle(5, 0xffd54f, 0.95);
 
-    const saveLabel = this.add.text(0, 42, 'Save',
-      { ...this.titleStyle, fontSize: '28px' }).setOrigin(0.5);
+    const style = (size, extra) => ({
+      fontFamily: CONFIG.BUBBLE_FONT, fontStyle: 'bold', fontSize: size + 'px',
+      color: '#ffffff', stroke: CONFIG.BUBBLE_STROKE_COLOR, strokeThickness: 5,
+      ...extra
+    });
 
-    this.banner.add([saveBtn, saveLabel]);
+    const title = this.add.text(W / 2, H * 0.12, 'New high score!',
+      style(30, { color: '#ffd54f' })).setOrigin(0.5);
+    const scoreLine = this.add.text(W / 2, H * 0.185, 'Score: ' + this.score,
+      style(34, { color: '#5ce6d0' })).setOrigin(0.5);
 
-    /* Keep the card clear of the keyboard.
+    // The name as it is being built. A drawn box, not an input field.
+    const box = this.add.rectangle(W / 2, H * 0.27, W * 0.76, 56, 0x1c2740)
+      .setStrokeStyle(4, 0xffd54f, 0.95);
+    const shown = this.add.text(W / 2, H * 0.27, 'Who played?', style(26, {
+      color: '#9aa4b8', strokeThickness: 3
+    })).setOrigin(0.5);
 
-       Two things go wrong otherwise. Android normally SHRINKS the web view
-       when the keyboard opens, which makes Phaser rescale the whole canvas
-       and drags the name box away from the card it belongs to - that is the
-       displacement seen on the phone. capacitor.config.json now sets the
-       keyboard to overlay instead of resize, which stops the rescaling.
+    this.nameEntry.add([dim, panel, title, scoreLine, box, shown]);
 
-       That leaves the simpler problem of the keyboard covering the lower
-       part of the screen, so the card slides up by however much it needs to
-       and slides back afterwards. Measuring the keyboard rather than
-       assuming a height matters: they vary a lot between phones, and by
-       whether the suggestion strip is showing. */
-    Native.onKeyboard(
-      keyboardCssPx => {
-        if (!this.banner || this.bannerRestY !== undefined) return;
+    const redraw = () => {
+      shown.setText(typed || 'Who played?');
+      shown.setColor(typed ? '#ffffff' : '#9aa4b8');
+    };
 
-        // The canvas is scaled to fit the screen, so a height in CSS pixels
-        // is not a height in game pixels.
-        const gamePerCss = this.scale.height / (window.innerHeight || this.scale.height);
-        const covered = keyboardCssPx * gamePerCss;
+    // --- The letters ------------------------------------------------
+    const rows = ['ABCDEFG', 'HIJKLMN', 'OPQRSTU', 'VWXYZ'];
+    const keyW = 54, keyH = H * 0.058, pitch = 58;
+    const topY = H * 0.365, rowGap = H * 0.077;
 
-        const saveBottom = this.banner.y + 42 + 30;
-        const clearLine = this.scale.height - covered - 14;
-        const lift = saveBottom - clearLine;
-        if (lift <= 0) return;
+    const addKey = (cx, cy, label, colour, onTap) => {
+      const k = this.add.rectangle(cx, cy, keyW, keyH, colour)
+        .setStrokeStyle(3, 0xffffff, 0.9)
+        .setInteractive({ useHandCursor: true });
+      const t = this.add.text(cx, cy, label, style(24)).setOrigin(0.5);
 
-        this.bannerRestY = this.banner.y;
-        this.banner.y -= lift;
-        if (this.nameInput) this.nameInput.y -= lift;
-      },
-      () => {
-        if (this.bannerRestY === undefined) return;
-        const lift = this.bannerRestY - this.banner.y;
-        this.banner.y = this.bannerRestY;
-        if (this.nameInput) this.nameInput.y += lift;
-        this.bannerRestY = undefined;
+      k.on('pointerdown', () => {
+        // A little squeeze, so a press on a drawn key still feels like a
+        // press. A real keyboard gives that feedback for free.
+        this.tweens.killTweensOf(k);
+        k.setScale(1);
+        this.tweens.add({ targets: k, scale: 1.15, duration: 70, yoyo: true });
+        onTap();
+      });
+
+      this.nameEntry.add([k, t]);
+    };
+
+    rows.forEach((row, r) => {
+      // Each row is centred on its own count, so the short last row does not
+      // sit hanging off to the left.
+      const count = row.length + (r === rows.length - 1 ? 1 : 0);   // + backspace
+      const startX = W / 2 - ((count - 1) * pitch) / 2;
+      const y = topY + r * rowGap;
+
+      row.split('').forEach((ch, i) => {
+        addKey(startX + i * pitch, y, ch, 0x2f6fed, () => {
+          if (typed.length < CONFIG.NAME_MAX_LEN) { typed += ch; redraw(); }
+        });
+      });
+
+      if (r === rows.length - 1) {
+        addKey(startX + row.length * pitch, y, '<', 0xff7f6b, () => {
+          typed = typed.slice(0, -1); redraw();
+        });
       }
-    );
+    });
 
-    saveBtn.on('pointerdown', () => {
-      const el = this.nameInput.node.querySelector('input');
-      const typed = (el && el.value ? el.value : '').trim().slice(0, CONFIG.NAME_MAX_LEN);
+    // --- Done -------------------------------------------------------
+    const doneY = H * 0.78;
+    const done = this.add.rectangle(W / 2, doneY, 240, 66, 0x4caf50)
+      .setStrokeStyle(4, 0xffffff, 0.95)
+      .setInteractive({ useHandCursor: true });
+    const doneLabel = this.add.text(W / 2, doneY, 'Done', style(30)).setOrigin(0.5);
 
-      const entry = { name: typed || 'Player', score: this.score };
+    const hint = this.add.text(W / 2, H * 0.855, 'Leave it blank to be "Player"',
+      style(16, { color: '#9aa4b8', strokeThickness: 3 })).setOrigin(0.5);
+
+    done.on('pointerdown', () => {
+      const entry = { name: typed.trim() || 'Player', score: this.score };
       const updated = scores.concat(entry)
         .sort((a, b) => b.score - a.score)
         .slice(0, CONFIG.HIGHSCORE_KEEP);
 
       const stored = saveHighScores(updated);
 
-      // Tear the whole form down before redrawing, the heading included -
-      // the table's own heading sits at exactly this height, and leaving
-      // this one behind would print the two over each other.
-      this.nameInput.destroy();
-      this.nameInput = null;
-      saveBtn.destroy();
-      saveLabel.destroy();
-      newBest.destroy();
+      this.nameEntry.destroy();
+      this.nameEntry = null;
 
-      this.showTable(updated, stored ? null : 'Could not save on this browser', entry);
+      this.showTable(updated, stored ? null : 'Could not save on this device', entry);
     });
+
+    this.nameEntry.add([done, doneLabel, hint]);
   }
 
 
@@ -2557,11 +2557,11 @@ class CarScene extends Phaser.Scene {
       this.banner = null;
     }
 
-    // The name box lives outside the card (it's a real DOM element), so it
-    // has to be cleared away separately or it would hang over the new run.
-    if (this.nameInput) {
-      this.nameInput.destroy();
-      this.nameInput = null;
+    // The name entry is its own overlay rather than part of the card, so it
+    // needs clearing separately if a run is restarted while it is open.
+    if (this.nameEntry) {
+      this.nameEntry.destroy();
+      this.nameEntry = null;
     }
 
     this.score = 0;
@@ -3165,7 +3165,9 @@ const game = new Phaser.Game({
   // Lets the name box be a real <input> laid over the canvas, so typing a
   // name brings up the phone's own keyboard. Phaser keeps it positioned in
   // game coordinates however the canvas is scaled.
-  dom: { createContainer: true },
+  // No DOM container. The name is typed on letter keys drawn inside the
+  // game, so there is no HTML element over the canvas any more - which is
+  // what was fighting the layout every time the phone's keyboard opened.
 
   // HomeScene is listed first, so it is what the app opens on. Everything
   // else lives on that one screen as overlays, so there is no menu scene.
