@@ -69,6 +69,15 @@
 </p>
 <div class="row" id="adaptive"></div>
 
+<h2>4. Home screen icons</h2>
+<p>
+  These two are what <code>manifest.json</code> asks for, so save them into the
+  project folder under exactly these names. They are what a phone uses if the
+  game is added to the home screen straight from the browser, without
+  installing anything.
+</p>
+<div class="row" id="web"></div>
+
 <script>
 function make(parent, size, shown, label, file, draw) {
   const wrap = document.createElement('div');
@@ -116,6 +125,16 @@ make(document.getElementById('adaptive'), 1024, 160,
 make(document.getElementById('adaptive'), 1024, 160,
      'Background layer', 'adaptive-background-1024.png',
      (ctx, s) => { ctx.fillStyle = L.COLOURS.background; ctx.fillRect(0, 0, s, s); });
+
+// The two the web manifest names. Rounded rather than square, because
+// nothing masks these - what is drawn is what appears on the home screen.
+make(document.getElementById('web'), 192, 120,
+     'icon-192.png', 'icon-192.png',
+     (ctx, s) => L.drawLogo(ctx, s, false));
+
+make(document.getElementById('web'), 512, 160,
+     'icon-512.png', 'icon-512.png',
+     (ctx, s) => L.drawLogo(ctx, s, false));
 </script>
 
 </body>
