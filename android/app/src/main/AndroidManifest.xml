@@ -12,7 +12,19 @@
         <!-- screenOrientation is locked to portrait. The game is a fixed
              portrait canvas; landscape would letterbox it into a stripe down
              the middle of the screen. Locking it here rather than hoping is
-             what stops a child rotating the phone mid-run. -->
+             what stops a child rotating the phone mid-run.
+
+             windowSoftInputMode is adjustNothing: when the keyboard opens,
+             do not resize the window and do not pan it. Without this Android
+             shrinks the web view, Phaser sees the window change size and
+             rescales the whole canvas, and the name box is dragged away from
+             the card it belongs to.
+
+             The Capacitor keyboard setting alone did not achieve this - the
+             activity's own soft-input mode was still winning, which is why
+             the first attempt at this made matters worse rather than better.
+             The keyboard now draws on top, and the finish card lifts itself
+             clear in code. -->
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:name=".MainActivity"
@@ -20,6 +32,7 @@
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"
             android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustNothing"
             android:exported="true">
 
             <intent-filter>

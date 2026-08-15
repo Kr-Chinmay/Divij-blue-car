@@ -2929,6 +2929,17 @@ class HomeScene extends Phaser.Scene {
     // Any tap here will do. It cannot start before one: browsers refuse
     // audio until the user has interacted, which is why the app is silent
     // for the moment between opening the link and the first touch.
+    // Arm the audio unlock NOW, before any touch has happened.
+    //
+    // This was the flaw in the previous attempt. init() is what installs the
+    // document-level unlock listener, but init() was only ever reached from
+    // inside start(), which was itself called from a pointerdown handler. So
+    // the listener that exists to catch the FIRST touch was being armed one
+    // touch too late, and could only ever catch the second.
+    GameMusic.init(this);
+
+    // Belt and braces. Phaser's own pointer event tries as well, and start()
+    // is safe to call as often as you like.
     this.input.once('pointerdown', () => GameMusic.start(this));
 
     // The menu needs its own mute. The one in the game is no use to a parent
