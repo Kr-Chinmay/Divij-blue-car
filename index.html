@@ -213,15 +213,21 @@ const CONFIG = {
   PLAY_STORE_URL: '',
 
   // --- Adverts ---
-  // GOOGLE'S PUBLIC TEST UNIT, not ours. It serves a permanent sample
-  // banner. Asking for real adverts from your own account while testing
-  // counts as invalid traffic and is how people get their AdMob account
-  // suspended, so the real id goes in only at release.
+  // The real banner unit, from Chinmay's AdMob account. The matching app id
+  // is in AndroidManifest.xml; the two belong together.
+  AD_BANNER_UNIT: 'ca-app-pub-4959005944172118/1806924696',
+
+  // THE ONE SWITCH THAT MATTERS BEFORE RELEASE.
   //
-  // The matching app id lives in AndroidManifest.xml and must be swapped at
-  // the same time. Note the punctuation: an APP id has a tilde, an AD UNIT
-  // id has a slash. Mixing them up produces adverts that silently never load.
-  AD_BANNER_UNIT: 'ca-app-pub-3940256099942544/6300978111',
+  // While true, Google serves sample adverts to this device even though the
+  // ids above are real. That is what makes testing safe: impressions and
+  // clicks from the developer's own phone count as invalid traffic, and are
+  // among the commonest reasons an AdMob account is suspended before it has
+  // earned anything at all.
+  //
+  // Set to false when building the release for the Play Store, and only
+  // then. Leaving it true would ship an app that shows sample adverts to
+  // every real player and earns nothing.
   AD_TESTING: true,
 
   // --- End of run ---

@@ -46,20 +46,24 @@
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
 
-        <!-- AdMob application id.
+        <!-- AdMob application id - the real one, from Chinmay's account.
 
-             This is GOOGLE'S PUBLIC TEST ID, not ours. It serves permanent
-             sample adverts, which is the only correct thing to use while
-             building: requesting real adverts from a developer's own account
-             during testing counts as invalid traffic and gets accounts
-             suspended.
+             This identifies the account. Whether a real advert or a sample
+             one is actually served is decided separately, by CONFIG.AD_TESTING
+             in the game. That stays true until release, so this phone gets
+             sample adverts while the correct id sits in place.
 
-             Replace with the real id from the AdMob console before release.
-             It looks the same but with different digits, and the tilde in
-             the middle marks it as an APP id rather than an ad unit id. -->
+             The reason for the split: impressions and clicks from the
+             developer's own device count as invalid traffic, and are one of
+             the commonest ways an AdMob account is suspended before it has
+             earned anything.
+
+             Note the tilde. An APP id has one; an AD UNIT id has a slash
+             instead. They look nearly identical and swapping them produces
+             adverts that silently never load. -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3940256099942544~3347511713" />
+            android:value="ca-app-pub-4959005944172118~7717726921" />
     </application>
 
     <!-- Permissions -->
