@@ -45,6 +45,21 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- AdMob application id.
+
+             This is GOOGLE'S PUBLIC TEST ID, not ours. It serves permanent
+             sample adverts, which is the only correct thing to use while
+             building: requesting real adverts from a developer's own account
+             during testing counts as invalid traffic and gets accounts
+             suspended.
+
+             Replace with the real id from the AdMob console before release.
+             It looks the same but with different digits, and the tilde in
+             the middle marks it as an APP id rather than an ad unit id. -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-3940256099942544~3347511713" />
     </application>
 
     <!-- Permissions -->

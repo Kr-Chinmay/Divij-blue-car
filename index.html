@@ -212,6 +212,18 @@ const CONFIG = {
   // than opening a link that does not exist yet.
   PLAY_STORE_URL: '',
 
+  // --- Adverts ---
+  // GOOGLE'S PUBLIC TEST UNIT, not ours. It serves a permanent sample
+  // banner. Asking for real adverts from your own account while testing
+  // counts as invalid traffic and is how people get their AdMob account
+  // suspended, so the real id goes in only at release.
+  //
+  // The matching app id lives in AndroidManifest.xml and must be swapped at
+  // the same time. Note the punctuation: an APP id has a tilde, an AD UNIT
+  // id has a slash. Mixing them up produces adverts that silently never load.
+  AD_BANNER_UNIT: 'ca-app-pub-3940256099942544/6300978111',
+  AD_TESTING: true,
+
   // --- End of run ---
   // What the finish card says instead of just announcing the run is over.
   //
@@ -933,6 +945,53 @@ const Native = {
     });
   },
 
+  /* -------------------------------------------------------------------
+     Adverts.
+
+     One banner, on the home screen only, and never while a run is on.
+
+     That placement is deliberate. Play's Families policy is strict about
+     adverts around children, and the formats that earn most - full-screen
+     interstitials between rounds, anything with a small close button - are
+     exactly the ones it scrutinises. A banner on a menu nobody is playing
+     interrupts nothing and cannot be tapped by mistake mid-drag.
+     ---------------------------------------------------------------- */
+  async showBanner() {
+    const AdMob = window.Capacitor
+                && window.Capacitor.Plugins
+                && window.Capacitor.Plugins.AdMob;
+    if (!AdMob) return;                       // web, or plugin unavailable
+
+    try {
+      if (!this.adsReady) {
+        await AdMob.initialize({ initializeForTesting: CONFIG.AD_TESTING });
+        this.adsReady = true;
+      }
+
+      await AdMob.showBanner({
+        adId: CONFIG.AD_BANNER_UNIT,
+        adSize: 'ADAPTIVE_BANNER',
+        position: 'BOTTOM_CENTER',
+        margin: 0,
+        // Non-personalised, matching the child-directed configuration set
+        // natively in MainActivity. Saying it both ways is deliberate.
+        npa: true,
+        isTesting: CONFIG.AD_TESTING
+      });
+    } catch (err) {
+      // No advert is a far better outcome than a broken game. This fails
+      // routinely and harmlessly - no network, no fill, aeroplane mode.
+    }
+  },
+
+  async hideBanner() {
+    const AdMob = window.Capacitor
+                && window.Capacitor.Plugins
+                && window.Capacitor.Plugins.AdMob;
+    if (!AdMob) return;
+    try { await AdMob.hideBanner(); } catch (err) { /* nothing showing */ }
+  },
+
   async keepAwake(on) {
     this.wantsAwake = on;
     try {
@@ -1383,6 +1442,11 @@ class CarScene extends Phaser.Scene {
     // no taps in it, which Android reads as no interaction at all - so
     // without this the screen dims on a child who is very much still playing.
     Native.keepAwake(true);
+
+    // No advert anywhere near the game. The banner belongs to the menu, and
+    // a child dragging a finger across a screen should not be able to land
+    // on one by accident.
+    Native.hideBanner();
 
     this.events.once('shutdown', () => {
       this.sfx.dispose();
@@ -2942,7 +3006,11 @@ class HomeScene extends Phaser.Scene {
     // --- The four grown-up options ----------------------------------
     // Small, but in the game's own bubble colours so the row still reads as
     // part of the same world rather than as a settings bar bolted on.
-    const optY = H * 0.83;
+    // Lifted from 0.83 to leave the foot of the screen for the advert
+    // banner, which is drawn by Android over the top of the game rather than
+    // inside it - so the game has to get out of its way rather than the
+    // other way round.
+    const optY = H * 0.78;
 
     const options = [
       ['ℹ️',  'How to Play', 0x4fc3f7, () => this.showHowToPlay()],
@@ -2964,7 +3032,7 @@ class HomeScene extends Phaser.Scene {
 
       this.add.text(x, optY, icon, { fontSize: '30px' }).setOrigin(0.5);
 
-      this.add.text(x, optY + 50, label, {
+      this.add.text(x, optY + 48, label, {
         fontFamily: CONFIG.BUBBLE_FONT, fontSize: '13px', fontStyle: 'bold',
         color: '#ffffff', stroke: CONFIG.BUBBLE_STROKE_COLOR, strokeThickness: 4
       }).setOrigin(0.5);
@@ -2983,6 +3051,10 @@ class HomeScene extends Phaser.Scene {
     // Any tap here will do. It cannot start before one: browsers refuse
     // audio until the user has interacted, which is why the app is silent
     // for the moment between opening the link and the first touch.
+    // The banner belongs to this screen only. It is shown here and hidden
+    // the moment a run starts, so nothing ever appears over the game itself.
+    Native.showBanner();
+
     // Arm the audio unlock NOW, before any touch has happened.
     //
     // This was the flaw in the previous attempt. init() is what installs the
@@ -3026,7 +3098,7 @@ class HomeScene extends Phaser.Scene {
     // --- Best score so far, if there is one -------------------------
     const best = loadHighScores()[0];
     if (best) {
-      this.add.text(W / 2, H * 0.955, 'Best: ' + best.name + '  ' + best.score, {
+      this.add.text(W / 2, H * 0.87, 'Best: ' + best.name + '  ' + best.score, {
         fontFamily: CONFIG.BUBBLE_FONT, fontSize: '22px',
         color: '#9aa4b8', stroke: CONFIG.BUBBLE_STROKE_COLOR, strokeThickness: 4
       }).setOrigin(0.5);

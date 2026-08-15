@@ -13,4 +13,14 @@ ext {
     androidxJunitVersion = '1.3.0'
     androidxEspressoCoreVersion = '3.7.0'
     cordovaAndroidVersion = '14.0.1'
+
+    // Pinned here so the app module and the AdMob plugin compile against the
+    // same Google Mobile Ads library. The plugin depends on it internally,
+    // but internal dependencies are not passed on to whoever uses the
+    // plugin - so MainActivity, which sets the child-directed advert rules,
+    // could not see the classes at all and the build failed.
+    //
+    // Setting it in one place means the two can never drift onto different
+    // versions, which produces far stranger errors than a missing class.
+    playServicesAdsVersion = '25.4.+'
 }
