@@ -51,11 +51,18 @@ captures/
 .idea/modules.xml
 # Comment next line if keeping position of elements in Navigation Editor is relevant for you
 .idea/navEditor.xml
+# This is a one-person project, so none of Android Studio's own settings are
+# worth sharing. Ignoring the folder wholesale keeps `git status` clean, which
+# matters more here than preserving IDE state.
+.idea/
 
 # Keystore files
-# Uncomment the following lines if you do not want to check your keystore files in.
-#*.jks
-#*.keystore
+# Uncommented deliberately. The signing key lives outside this repository
+# entirely, but a key committed even once is a key that must be treated as
+# compromised - git keeps it in the history for ever. Two layers of
+# protection cost nothing; the root .gitignore carries the same two rules.
+*.jks
+*.keystore
 
 # External native build folder generated in Android Studio 2.2 and later
 .externalNativeBuild
