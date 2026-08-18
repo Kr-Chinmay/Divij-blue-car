@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Feature Graphic Builder - Mini Driver, Mega Values</title>
+
+<!-- =====================================================================
+     THE PLAY STORE FEATURE GRAPHIC - 1024 x 500
+
+     The wide banner Google shows at the top of the store listing. It is a
+     required field: the listing cannot be published without one.
+
+     Built the same way as icon.html, and for the same reason - it loads
+     logo.js, so the car here is the identical car drawn on the home
+     screen and on the launcher icon. Three files that must always agree,
+     kept in agreement by there being only one drawing of the car.
+
+     Three designs, because this is the one asset with real room for
+     taste. Look at all three at thumbnail size before choosing - that is
+     how most people will first meet it.
+
+     GOOGLE'S RULES, which all three obey:
+       - exactly 1024 x 500 pixels
+       - PNG or JPEG, no transparency
+       - no important content in the outer 5%, which gets cropped on
+         some surfaces
+       - if a promo video is ever added, Play lays a round play button
+         over the CENTRE, so nothing that matters goes there
+     ================================================================== -->
+
+<style>
+  body {
+    margin: 0; padding: 30px 22px 90px;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    background: #10141c; color: #e8edf7; line-height: 1.6;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; }
+  h1 { font-size: 25px; margin: 0 0 4px; }
+  .sub { color: #8f9bb3; margin: 0 0 26px; font-size: 15px; }
+
+  .card {
+    background: #172033; border: 1px solid #263349; border-radius: 12px;
+    padding: 20px; margin-bottom: 26px;
+  }
+  .card h2 { font-size: 19px; margin: 0 0 3px; color: #ffd54f; }
+  .card .why { color: #94a2bd; font-size: 14px; margin: 0 0 16px; }
+
+  /* Displayed at half size. The canvas is always the true 1024x500. */
+  canvas { width: 100%; max-width: 1024px; height: auto; display: block;
+           border-radius: 8px; background: #000; }
+
+  button {
+    margin-top: 14px; padding: 11px 20px; font-size: 15px; font-weight: 600;
+    background: #2f6fed; color: #fff; border: 0; border-radius: 7px;
+    cursor: pointer; font-family: inherit;
+  }
+  button:hover { background: #4580ff; }
+
+  .toggle {
+    display: inline-flex; align-items: center; gap: 9px;
+    margin: 0 0 22px; padding: 10px 15px; background: #172033;
+    border: 1px solid #263349; border-radius: 8px; cursor: pointer;
+    font-size: 14px; color: #cbd6ea;
+  }
+  .note {
+    background: #1d2a1f; border-left: 3px solid #66bb6a;
+    padding: 13px 17px; border-radius: 6px; margin: 22px 0; font-size: 14.5px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Feature graphic builder</h1>
+<p class="sub">
+  1024&nbsp;&times;&nbsp;500 &nbsp;&middot;&nbsp; three designs &nbsp;&middot;&nbsp;
+  pick one, press its download button, upload it to the Play listing
+</p>
+
+<label class="toggle">
+  <input type="checkbox" id="safe" />
+  Show the safe zone &mdash; the dashed box is what always survives cropping,
+  and the circle is where Play puts a play button if you ever add a video
+</label>
+
+<div class="card">
+  <h2>1 &nbsp;Badge</h2>
+  <p class="why">
+    Logo and name, nothing else. The clearest of the three at small sizes and
+    the least likely to look dated. Safest choice.
+  </p>
+  <canvas id="c1" width="1024" height="500"></canvas>
+  <button data-c="c1" data-f="feature-graphic-badge.png">Download this one</button>
+</div>
+
+<div class="card">
+  <h2>2 &nbsp;On the road</h2>
+  <p class="why">
+    A real slice of the game on the left &mdash; the tar road, the car, the
+    kind words drifting down &mdash; with the name beside it. Tells a parent
+    what the game actually is before they read a word.
+  </p>
+  <canvas id="c2" width="1024" height="500"></canvas>
+  <button data-c="c2" data-f="feature-graphic-road.png">Download this one</button>
+</div>
+
+<div class="card">
+  <h2>3 &nbsp;Word field</h2>
+  <p class="why">
+    The car surrounded by the words themselves, including one grey spiky one
+    to catch. The warmest of the three, and the busiest.
+  </p>
+  <canvas id="c3" width="1024" height="500"></canvas>
+  <button data-c="c3" data-f="feature-graphic-words.png">Download this one</button>
+</div>
+
+<div class="note">
+  <strong>After downloading:</strong> in Play Console go to
+  <em>Grow &rarr; Store presence &rarr; Main store listing</em>, scroll to
+  <em>Graphics</em>, and upload the file under <em>Feature graphic</em>.
+  Google checks the size on upload, so a file that uploads is a file that fits.
+</div>
+
+</div>
+
+<script src="logo.js"></script>
+<script>
+'use strict';
+
+/* The game's own palette. Copied from CONFIG in index.html rather than
+   invented, so the banner cannot drift away from what the game looks
+   like. If those change, change these. */
+var BUBBLE = ['#4fc3f7', '#66bb6a', '#ffd54f', '#ff7f6b',
+              '#ab7df6', '#ffa726', '#ff8ac4'];
+var BAD       = '#4a4f5e';
+var BAD_EDGE  = '#8b95a8';
+var TAR       = '#14161d';
+var TAR_LIGHT = '#1b2030';
+var NAVY      = '#101828';
+var ORANGE    = '#ffa726';
+var BLUE      = '#2f6fed';
+
+var W = 1024, H = 500;
+
+/* A heavy, wide face. Arial Black exists on every Windows machine and on
+   most others; the fallbacks cover the rest. The game's own words are set
+   the same way - chunky, with a dark stroke, so they stay legible over
+   any colour behind them. */
+function font(px) {
+  return '900 ' + px + 'px "Arial Black", "Segoe UI", Impact, sans-serif';
+}
+
+/* Text with a thick dark outline. The outline is what lets one colour of
+   text sit over an orange field, a dark road and a coloured bubble
+   without ever needing a second colour. */
+function text(ctx, str, x, y, px, fill, stroke, align) {
+  ctx.font = font(px);
+  ctx.textAlign = align || 'left';
+  ctx.textBaseline = 'middle';
+  if (stroke) {
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = px * 0.18;
+    ctx.strokeStyle = stroke;
+    ctx.strokeText(str, x, y);
+  }
+  ctx.fillStyle = fill;
+  ctx.fillText(str, x, y);
+}
+
+function roundRect(ctx, x, y, w, h, r, fill) {
+  r = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y,     x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x,     y + h, r);
+  ctx.arcTo(x,     y + h, x,     y,     r);
+  ctx.arcTo(x,     y,     x + w, y,     r);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+}
+
+/* A kind-word bubble: filled circle, white word across it.
+
+   The word is shrunk until it fits inside the circle rather than being
+   set at a fixed size, exactly as the game does it. "Thank you" and
+   "Kind" are very different lengths and both have to sit comfortably. */
+function bubble(ctx, x, y, r, colour, word) {
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = colour;
+  ctx.fill();
+  // A solid white ring, not a translucent one. Three of the seven bubble
+  // colours are warm - yellow, salmon, orange - and on an orange field a
+  // faint ring left them barely separable from the background. Solid
+  // white guarantees every colour reads against every background here.
+  ctx.lineWidth = r * 0.11;
+  ctx.strokeStyle = '#ffffff';
+  ctx.stroke();
+
+  var px = r * 0.46;
+  ctx.font = font(px);
+  while (ctx.measureText(word).width > r * 1.55 && px > 8) {
+    px -= 1;
+    ctx.font = font(px);
+  }
+  text(ctx, word, x, y, px, '#ffffff', 'rgba(16,24,40,0.85)', 'center');
+}
+
+/* A bad bubble: a 13-pointed star in storm grey.
+
+   Different in shape as well as in colour, which is the whole point - a
+   five-year-old reacts to the silhouette long before reading the word,
+   and a colour-blind child gets the same warning. */
+function badBubble(ctx, x, y, r, word) {
+  var spikes = 13, inner = r * 0.82;
+  ctx.beginPath();
+  for (var i = 0; i < spikes * 2; i++) {
+    var rad = (i % 2 === 0) ? r : inner;
+    var a = (Math.PI / spikes) * i - Math.PI / 2;
+    var px = x + Math.cos(a) * rad;
+    var py = y + Math.sin(a) * rad;
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  ctx.fillStyle = BAD;
+  ctx.fill();
+  ctx.lineWidth = r * 0.07;
+  ctx.strokeStyle = BAD_EDGE;
+  ctx.stroke();
+
+  var size = r * 0.42;
+  ctx.font = font(size);
+  while (ctx.measureText(word).width > r * 1.4 && size > 8) {
+    size -= 1;
+    ctx.font = font(size);
+  }
+  text(ctx, word, x, y, size, '#d6dcea', 'rgba(16,24,40,0.9)', 'center');
+}
+
+/* The car, drawn into an arbitrary box.
+
+   logo.js draws into a square starting at the origin, so this translates
+   and scales around it rather than duplicating any of the artwork. */
+function car(ctx, cx, cy, size) {
+  ctx.save();
+  ctx.translate(cx - size / 2, cy - size / 2);
+  MiniDriverLogo.drawCar(ctx, size, 1);
+  ctx.restore();
+}
+
+/* The rounded-square app icon, as it appears on a phone.
+
+   The shadow is not decoration. The tile is the same orange as design 1's
+   field, so without it the rounded square disappears completely and the
+   car looks like a loose drawing floating on a background. The shadow is
+   the only thing that makes it read as an icon. */
+function badge(ctx, cx, cy, size) {
+  ctx.save();
+  ctx.translate(cx - size / 2, cy - size / 2);
+
+  ctx.shadowColor   = 'rgba(74, 30, 0, 0.42)';
+  ctx.shadowBlur    = size * 0.10;
+  ctx.shadowOffsetY = size * 0.045;
+  roundRect(ctx, 0, 0, size, size, size * 0.215, ORANGE);
+  ctx.shadowColor   = 'transparent';
+  ctx.shadowBlur    = 0;
+  ctx.shadowOffsetY = 0;
+
+  MiniDriverLogo.drawCar(ctx, size, 1);
+  ctx.restore();
+}
+
+/* ---------------------------------------------------------------------
+   DESIGN 1 - BADGE
+   Icon left, name right, on the game's orange. Everything sits well
+   inside the safe zone and the middle is deliberately quiet.
+   ------------------------------------------------------------------ */
+function design1(ctx) {
+  ctx.fillStyle = ORANGE;
+  ctx.fillRect(0, 0, W, H);
+
+  // Soft darker discs, just enough to stop a flat orange rectangle.
+  ctx.globalAlpha = 0.10;
+  ctx.fillStyle = '#c2410c';
+  [[880, 90, 150], [960, 420, 110], [120, 460, 90]].forEach(function (d) {
+    ctx.beginPath(); ctx.arc(d[0], d[1], d[2], 0, Math.PI * 2); ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+
+  badge(ctx, 200, 250, 290);
+
+  // 68px, not 74. At 74 "MEGA VALUES" reached x=994, past the 972 where
+  // cropping can begin. Measured, not guessed.
+  text(ctx, 'MINI DRIVER,', 400, 196, 68, '#ffffff', NAVY);
+  text(ctx, 'MEGA VALUES', 400, 278, 68, '#ffffff', NAVY);
+  text(ctx, 'Catch the kind words', 400, 352, 33, NAVY, null);
+}
+
+/* ---------------------------------------------------------------------
+   DESIGN 2 - ON THE ROAD
+   A vertical slice of the actual game on the left, name on the right.
+   The road stays vertical because that is how the game reads; turning it
+   sideways would show something the player never sees.
+   ------------------------------------------------------------------ */
+function design2(ctx) {
+  // Orange, not navy. On navy the tar road was invisible: #14161d against
+  // #101828 is a difference no eye picks up, so the whole left third read
+  // as one dark smudge and the point of showing the game was lost.
+  // Against orange the road is unmistakably a road.
+  ctx.fillStyle = ORANGE;
+  ctx.fillRect(0, 0, W, H);
+
+  var rx = 60, rw = 340;              // the road slice
+
+  // Green verges, then tar, then the dashed centre line.
+  ctx.fillStyle = '#2e7d32';
+  ctx.fillRect(rx - 30, 0, rw + 60, H);
+  ctx.fillStyle = TAR;
+  ctx.fillRect(rx, 0, rw, H);
+
+  // The dash is lightened well past the game's TAR_LIGHT. In the game the
+  // road fills the screen and a whisper of a dash is enough; at banner
+  // size it simply disappeared.
+  for (var y = -20; y < H; y += 96) {
+    roundRect(ctx, rx + rw / 2 - 7, y, 14, 54, 7, '#49536e');
+  }
+
+  // Everything shifted up and shrunk slightly. At the first sizes the car
+  // reached y=517 on a 500px canvas - its bottom was simply cut off, and
+  // the crop zone would have taken more. These clear the bottom edge with
+  // room to spare, and the lowest bubble clears the car's roof.
+  bubble(ctx, rx + 105, 76,  54, BUBBLE[2], 'Kind');
+  bubble(ctx, rx + 232, 186, 54, BUBBLE[1], 'Share');
+  bubble(ctx, rx + 96,  292, 54, BUBBLE[0], 'Brave');
+  car(ctx, rx + rw / 2, 408, 118);
+
+  // Name on the right, clear of the road slice.
+  // 60px for the same reason as design 1 - 66 pushed "MEGA VALUES" to 986.
+  text(ctx, 'MINI DRIVER,',  456, 178, 60, '#ffffff', NAVY);
+  text(ctx, 'MEGA VALUES',   456, 252, 60, '#ffffff', NAVY);
+  text(ctx, 'Collect the kind words.', 458, 330, 30, NAVY, null);
+  text(ctx, 'Dodge the unkind ones.',  458, 372, 30, NAVY, null);
+}
+
+/* ---------------------------------------------------------------------
+   DESIGN 3 - WORD FIELD
+   The words themselves are the artwork. One grey spiky one is included
+   because dodging is half the game, and a listing that shows only the
+   nice half misrepresents it.
+   ------------------------------------------------------------------ */
+function design3(ctx) {
+  var grad = ctx.createLinearGradient(0, 0, W, H);
+  grad.addColorStop(0, '#ffb74d');
+  grad.addColorStop(1, '#ff8f3f');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Scattered by hand rather than randomly, so the middle stays open and
+  // nothing crowds the edges that get cropped.
+  bubble(ctx, 152, 104, 58, BUBBLE[0], 'Kind');
+  bubble(ctx, 862, 118, 58, BUBBLE[1], 'Share');
+  bubble(ctx, 128, 392, 58, BUBBLE[4], 'Honest');
+  bubble(ctx, 892, 386, 58, BUBBLE[6], 'Brave');
+  // y=84 rather than 74: at 74 these two reached up to y=22, inside the
+  // top 25px that cropping can take.
+  bubble(ctx, 322, 84,  52, BUBBLE[3], 'Sorry');
+  bubble(ctx, 706, 84,  52, BUBBLE[2], 'Thank you');
+  badBubble(ctx, 700, 408, 54, 'Shout');
+
+  car(ctx, 300, 300, 176);
+
+  text(ctx, 'MINI DRIVER,', 700, 218, 60, '#ffffff', NAVY, 'center');
+  text(ctx, 'MEGA VALUES', 700, 288, 60, '#ffffff', NAVY, 'center');
+}
+
+/* The safe zone, drawn on top and never downloaded - the download
+   redraws the design clean before exporting. */
+function overlay(ctx) {
+  ctx.save();
+  ctx.setLineDash([12, 10]);
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'rgba(255,80,80,0.9)';
+  ctx.strokeRect(W * 0.05, H * 0.05, W * 0.90, H * 0.90);
+
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.arc(W / 2, H / 2, 78, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+var DESIGNS = { c1: design1, c2: design2, c3: design3 };
+
+function render() {
+  var showSafe = document.getElementById('safe').checked;
+  Object.keys(DESIGNS).forEach(function (id) {
+    var ctx = document.getElementById(id).getContext('2d');
+    ctx.clearRect(0, 0, W, H);
+    DESIGNS[id](ctx);
+    if (showSafe) overlay(ctx);
+  });
+}
+
+document.getElementById('safe').addEventListener('change', render);
+
+document.querySelectorAll('button[data-c]').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var id = btn.getAttribute('data-c');
+    var canvas = document.getElementById(id);
+    var ctx = canvas.getContext('2d');
+
+    // Always export without the safe-zone overlay, whatever is on screen.
+    ctx.clearRect(0, 0, W, H);
+    DESIGNS[id](ctx);
+
+    canvas.toBlob(function (blob) {
+      var link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = btn.getAttribute('data-f');
+      link.click();
+      setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000);
+      render();                       // put the overlay back if it was on
+    }, 'image/png');
+  });
+});
+
+render();
+</script>
+</body>
+</html>
