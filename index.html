@@ -228,7 +228,12 @@ const CONFIG = {
   // Set to false when building the release for the Play Store, and only
   // then. Leaving it true would ship an app that shows sample adverts to
   // every real player and earns nothing.
-  AD_TESTING: true,
+  //
+  // NOW FALSE - this is a release build, so REAL adverts are being served.
+  // From here on, do not tap the banner on your own phone, and tell the
+  // closed testers not to tap it either. Set this back to true for any
+  // build meant only for trying things out.
+  AD_TESTING: false,
 
   // --- End of run ---
   // What the finish card says instead of just announcing the run is over.
