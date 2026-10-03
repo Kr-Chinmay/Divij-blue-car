@@ -212,29 +212,6 @@ const CONFIG = {
   // than opening a link that does not exist yet.
   PLAY_STORE_URL: '',
 
-  // --- Adverts ---
-  // The real banner unit, from Chinmay's AdMob account. The matching app id
-  // is in AndroidManifest.xml; the two belong together.
-  AD_BANNER_UNIT: 'ca-app-pub-4959005944172118/1806924696',
-
-  // THE ONE SWITCH THAT MATTERS BEFORE RELEASE.
-  //
-  // While true, Google serves sample adverts to this device even though the
-  // ids above are real. That is what makes testing safe: impressions and
-  // clicks from the developer's own phone count as invalid traffic, and are
-  // among the commonest reasons an AdMob account is suspended before it has
-  // earned anything at all.
-  //
-  // Set to false when building the release for the Play Store, and only
-  // then. Leaving it true would ship an app that shows sample adverts to
-  // every real player and earns nothing.
-  //
-  // NOW FALSE - this is a release build, so REAL adverts are being served.
-  // From here on, do not tap the banner on your own phone, and tell the
-  // closed testers not to tap it either. Set this back to true for any
-  // build meant only for trying things out.
-  AD_TESTING: false,
-
   // --- End of run ---
   // What the finish card says instead of just announcing the run is over.
   //
@@ -956,53 +933,6 @@ const Native = {
     });
   },
 
-  /* -------------------------------------------------------------------
-     Adverts.
-
-     One banner, on the home screen only, and never while a run is on.
-
-     That placement is deliberate. Play's Families policy is strict about
-     adverts around children, and the formats that earn most - full-screen
-     interstitials between rounds, anything with a small close button - are
-     exactly the ones it scrutinises. A banner on a menu nobody is playing
-     interrupts nothing and cannot be tapped by mistake mid-drag.
-     ---------------------------------------------------------------- */
-  async showBanner() {
-    const AdMob = window.Capacitor
-                && window.Capacitor.Plugins
-                && window.Capacitor.Plugins.AdMob;
-    if (!AdMob) return;                       // web, or plugin unavailable
-
-    try {
-      if (!this.adsReady) {
-        await AdMob.initialize({ initializeForTesting: CONFIG.AD_TESTING });
-        this.adsReady = true;
-      }
-
-      await AdMob.showBanner({
-        adId: CONFIG.AD_BANNER_UNIT,
-        adSize: 'ADAPTIVE_BANNER',
-        position: 'BOTTOM_CENTER',
-        margin: 0,
-        // Non-personalised, matching the child-directed configuration set
-        // natively in MainActivity. Saying it both ways is deliberate.
-        npa: true,
-        isTesting: CONFIG.AD_TESTING
-      });
-    } catch (err) {
-      // No advert is a far better outcome than a broken game. This fails
-      // routinely and harmlessly - no network, no fill, aeroplane mode.
-    }
-  },
-
-  async hideBanner() {
-    const AdMob = window.Capacitor
-                && window.Capacitor.Plugins
-                && window.Capacitor.Plugins.AdMob;
-    if (!AdMob) return;
-    try { await AdMob.hideBanner(); } catch (err) { /* nothing showing */ }
-  },
-
   async keepAwake(on) {
     this.wantsAwake = on;
     try {
@@ -1453,11 +1383,6 @@ class CarScene extends Phaser.Scene {
     // no taps in it, which Android reads as no interaction at all - so
     // without this the screen dims on a child who is very much still playing.
     Native.keepAwake(true);
-
-    // No advert anywhere near the game. The banner belongs to the menu, and
-    // a child dragging a finger across a screen should not be able to land
-    // on one by accident.
-    Native.hideBanner();
 
     this.events.once('shutdown', () => {
       this.sfx.dispose();
@@ -3017,11 +2942,11 @@ class HomeScene extends Phaser.Scene {
     // --- The four grown-up options ----------------------------------
     // Small, but in the game's own bubble colours so the row still reads as
     // part of the same world rather than as a settings bar bolted on.
-    // Lifted from 0.83 to leave the foot of the screen for the advert
-    // banner, which is drawn by Android over the top of the game rather than
-    // inside it - so the game has to get out of its way rather than the
-    // other way round.
-    const optY = H * 0.78;
+    // Back to 0.83, where it sat before adverts existed. It had been lifted
+    // to 0.78 to clear the banner, which Android drew over the top of the
+    // game rather than inside it. With no banner there is nothing to clear,
+    // and the row sits better low.
+    const optY = H * 0.83;
 
     const options = [
       ['ℹ️',  'How to Play', 0x4fc3f7, () => this.showHowToPlay()],
@@ -3062,10 +2987,6 @@ class HomeScene extends Phaser.Scene {
     // Any tap here will do. It cannot start before one: browsers refuse
     // audio until the user has interacted, which is why the app is silent
     // for the moment between opening the link and the first touch.
-    // The banner belongs to this screen only. It is shown here and hidden
-    // the moment a run starts, so nothing ever appears over the game itself.
-    Native.showBanner();
-
     // Arm the audio unlock NOW, before any touch has happened.
     //
     // This was the flaw in the previous attempt. init() is what installs the
@@ -3136,11 +3057,12 @@ class HomeScene extends Phaser.Scene {
     // an open panel.
     const dim = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.75).setInteractive();
 
-    // The card is deliberately generous. Privacy grew to five paragraphs
-    // when the Google Play and adverts lines went in, and on a short screen
-    // the old proportions squeezed it down to 13px with a single pixel to
-    // spare. It never overflowed - the fitting loop saw to that - but 13px
-    // is not a size to ask a parent to read a privacy notice at.
+    // The card is deliberately generous. Privacy once grew long enough that
+    // on a short screen the old proportions squeezed it to 13px with a
+    // single pixel to spare. It never overflowed - the fitting loop saw to
+    // that - but 13px is not a size to ask a parent to read a privacy
+    // notice at. The text is shorter now that the adverts paragraph has
+    // gone; the room is kept because How to Play uses this same card.
     const card = this.add.rectangle(W / 2, H * 0.50, W * 0.88, H * 0.78, 0x101a2e, 0.98)
       .setStrokeStyle(5, 0xffd54f, 0.95);
 
@@ -3200,20 +3122,16 @@ class HomeScene extends Phaser.Scene {
 
   showPrivacy() {
     this.showPanel('Privacy', [
-      // Scoped to "the game itself" on purpose. Once adverts are added, a
-      // blanket "this app collects nothing" would be untrue, but this stays
-      // accurate: what the game does and what a third party does are
-      // genuinely different things, and the lines below say so plainly.
-      'The game itself collects nothing. No sign-in, no account, and no tracking of its own.',
+      // No longer scoped to "the game itself". That hedge existed because
+      // adverts meant a third party was collecting something even though the
+      // game was not, so a blanket claim would have been untrue. With the
+      // advert library gone there is no third party left, and the plain
+      // sentence is now simply accurate.
+      'This game collects nothing at all. No sign-in, no account, no adverts, and no tracking of any kind.',
       'Best scores are saved on this device only. Nobody else can see them, and clearing the app\'s data erases them.',
-      'This app is distributed through Google Play. Google may collect information about installs and crashes under its own privacy policy, separately from the game.',
-      // Ends here on purpose. There was a line about the game engine being
-      // fetched from a public code library when run in a browser, but anyone
-      // reading this panel is inside the installed app, where the engine is
-      // bundled - so it described a situation the reader is not in, and
-      // diluted the two disclosures that actually matter. That fact belongs
-      // in the hosted web policy, where the reader really is in a browser.
-      'Any adverts shown are provided by Google, which may collect information through them under its own privacy policy, independently of the game.'
+      // The Play line stays. It is still true, and it is the one collection
+      // a parent might reasonably wonder about once the adverts are gone.
+      'This app is distributed through Google Play. Google may collect information about installs and crashes under its own privacy policy, separately from the game.'
     ]);
   }
 

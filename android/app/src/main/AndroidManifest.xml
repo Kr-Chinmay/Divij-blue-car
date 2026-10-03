@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          xmlns:tools="http://schemas.android.com/tools">
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -46,27 +47,36 @@
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
 
-        <!-- AdMob application id - the real one, from Chinmay's account.
-
-             This identifies the account. Whether a real advert or a sample
-             one is actually served is decided separately, by CONFIG.AD_TESTING
-             in the game. That stays true until release, so this phone gets
-             sample adverts while the correct id sits in place.
-
-             The reason for the split: impressions and clicks from the
-             developer's own device count as invalid traffic, and are one of
-             the commonest ways an AdMob account is suspended before it has
-             earned anything.
-
-             Note the tilde. An APP id has one; an AD UNIT id has a slash
-             instead. They look nearly identical and swapping them produces
-             adverts that silently never load. -->
-        <meta-data
-            android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-4959005944172118~7717726921" />
     </application>
 
-    <!-- Permissions -->
+    <!-- Permissions: none, deliberately.
 
-    <uses-permission android:name="android.permission.INTERNET" />
+         INTERNET was here only so the advert banner could be fetched. With
+         the adverts gone nothing in this app ever reaches the network: the
+         game, the Phaser engine, every sound and every piece of artwork are
+         bundled inside the package, and the high scores never leave the
+         device.
+
+         Deleting the line was not enough. Capacitor's own library declares
+         INTERNET in its manifest, and the build merges every library's
+         declarations into the app's - so it came straight back. The
+         directive below is the override that removes it from the merged
+         result. Verified by reading the merged manifest, not by assuming.
+
+         Declaring no permissions is worth more than it looks on a
+         children's app. Play shows a parent exactly this list, and the
+         claim cannot be fudged: the system enforces it whatever the code
+         tries to do.
+
+         The build now prints "was tagged to remove other declarations but
+         no other declaration present". That warning is expected and is not
+         a problem: the AdMob plugin was what re-added INTERNET, so with it
+         uninstalled there is nothing left to remove. The directive stays
+         anyway, as a guard. A permission appearing because some library
+         decided to declare one is exactly how AD_ID arrived here unasked.
+
+         TO PUT IT BACK, if the game ever needs the network: delete the
+         tools:node attribute below, leaving the plain uses-permission line.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
 </manifest>
